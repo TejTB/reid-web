@@ -1,26 +1,232 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-bg-dark: #0A1628;
+  --color-bg-card: rgba(255, 255, 255, 0.06);
+  --color-bg-nav: rgba(10, 22, 40, 0.95);
+  --color-bg-sidebar: rgba(8, 18, 34, 0.98);
+  --color-bg-input: rgba(255, 255, 255, 0.05);
+  --color-bg-card-2: rgba(255, 255, 255, 0.05);
+  --color-bg-card-strong: rgba(255, 255, 255, 0.07);
+  --color-text-primary: #F2EDE3;
+  --color-text-secondary: #C8D5E3;
+  --color-text-dim: #7A90A8;
+  --color-accent: #B91C1C;
+  --color-accent-hover: #991B1B;
+  --color-divider: rgba(242, 237, 232, 0.08);
+  --color-sidebar-divider: rgba(242, 237, 232, 0.06);
+  --color-glass-border: rgba(255, 255, 255, 0.09);
+  --color-glass-sheen: rgba(255, 255, 255, 0.08);
+  --color-progress-inactive: rgba(255, 255, 255, 0.15);
+  --color-avatar-bg: rgba(255, 255, 255, 0.08);
+  --color-dashed-border: rgba(255, 255, 255, 0.08);
+  --color-scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --color-select-bg: rgba(185, 28, 28, 0.3);
+  --color-focus-ring: rgba(185, 28, 28, 0.5);
+  --color-nav-active-bg: rgba(255, 255, 255, 0.06);
+  --color-nav-hover-bg: rgba(255, 255, 255, 0.03);
+
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html, body { height: 100%; }
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-bg-dark);
+  color: var(--color-text-primary);
 }
+
+/* Scrollbars: thin, thumb subtle, track transparent. */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background-color: var(--color-scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-track { background-color: transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--color-scrollbar-thumb) transparent; }
+
+/* Text selection: brand red wash, primary text retained. */
+::selection { background: rgba(185, 28, 28, 0.3); color: #F2EDE3; }
+
+/* Focus rings: red, never blue. */
+*:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+
+/* Hide Next.js dev build watcher (legacy id, kept as a safety net). */
+#__next-build-watcher { display: none !important; }
+
+/* Glass surface base. */
+.glass {
+  background-color: var(--color-bg-card);
+  border: 1px solid var(--color-glass-border);
+  backdrop-filter: blur(28px) saturate(1.5);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+}
+
+/* Reusable 1px top sheen for any surface. Element must allow ::before. */
+.sheen-top { position: relative; }
+.sheen-top::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.08) 50%, transparent 100%);
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+  pointer-events: none;
+}
+
+/* User-message asymmetric pill with top sheen. */
+.user-bubble {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px 16px 4px 16px;
+  position: relative;
+}
+.user-bubble::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.08) 50%, transparent 100%);
+  border-radius: 16px 16px 0 0;
+  pointer-events: none;
+}
+/* Legacy alias used by some files. */
+.user-msg {
+  background-color: var(--color-bg-card-strong);
+  border: 1px solid var(--color-glass-border);
+  border-radius: 16px 16px 4px 16px;
+  position: relative;
+}
+.user-msg::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--color-glass-sheen) 50%, transparent 100%);
+  border-radius: 16px 16px 0 0;
+}
+
+/* Input bar with top sheen. */
+.input-bar {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  position: relative;
+}
+.input-bar::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.08) 50%, transparent 100%);
+  border-radius: 14px 14px 0 0;
+  pointer-events: none;
+}
+
+/* Home card. */
+.home-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  padding: 28px 32px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  position: relative;
+}
+.home-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.08) 50%, transparent 100%);
+  border-radius: 16px 16px 0 0;
+  pointer-events: none;
+}
+
+/* Red-shadow CTA. */
+.cta-shadow { box-shadow: 0 4px 20px rgba(185, 28, 28, 0.3); }
+.cta-shadow:hover { box-shadow: 0 6px 28px rgba(185, 28, 28, 0.45); }
+
+/* Logo hover variant (interactive). */
+.logo-mark--interactive { transition: filter 250ms ease; }
+.logo-mark--interactive:hover {
+  filter:
+    drop-shadow(0 0 12px rgba(185, 28, 28, 0.75))
+    drop-shadow(0 0 28px rgba(185, 28, 28, 0.35));
+}
+
+/* Onboarding chat radial gradient background. */
+.onboarding-bg {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(185, 28, 28, 0.06) 0%, transparent 70%),
+    #0A1628;
+}
+
+/* Message fade-up entrance. */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fade-up 400ms ease both; }
+
+/* Page enter animation, applied by AppShell. */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter { animation: page-enter 300ms ease-out both; }
+
+/* Reid logo pulse: runs exactly twice. */
+@keyframes reid-pulse {
+  0%, 100% { filter: drop-shadow(0 0 24px rgba(185, 28, 28, 0.9)); }
+  50%      { filter: drop-shadow(0 0 8px  rgba(185, 28, 28, 0.4)); }
+}
+.animate-reid-pulse { animation: reid-pulse 800ms ease-in-out 2; }
+
+/* Legacy message-in alias (used in some places). */
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-message-in { animation: message-in 400ms ease-out both; }
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-card-in { animation: card-in 400ms ease-out both; }
+
+/* Typing indicator dots: 3 dots, 6px, staggered. */
+@keyframes typing-blink {
+  0%, 80%, 100% { opacity: 0.3; }
+  40%           { opacity: 1; }
+}
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7A90A8;
+  animation: typing-blink 1.2s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+/* Legacy typing-dot keyframe still referenced by some files. */
+@keyframes typing-dot {
+  0%, 100% { opacity: 0.3; transform: translateY(0); }
+  50%      { opacity: 1;   transform: translateY(-2px); }
+}
+.animate-typing-dot { animation: typing-dot 900ms ease-in-out infinite; }
+
+/* Skeleton pulse. */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 0.6; }
+}
+.animate-skeleton { animation: skeleton-pulse 1400ms ease-in-out infinite; }
+
+/* Streaming caret. */
+@keyframes caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.animate-caret { animation: caret-blink 1000ms steps(1) infinite; }
