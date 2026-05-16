@@ -367,7 +367,7 @@ export async function POST(req: NextRequest) {
   // can decide whether to rate-limit.
   const { data: meRow } = await db
     .from("users")
-    .select("id, subscription_status")
+    .select("id, subscription_status, name")
     .eq("auth_id", authUser.id)
     .maybeSingle();
   if (!meRow?.id) {
@@ -376,6 +376,14 @@ export async function POST(req: NextRequest) {
   const userId = meRow.id as string;
   const subscriptionStatus =
     (meRow.subscription_status as string | null) ?? "free";
+  const existingName = (meRow.name as string | null) ?? null;
+
+  if (!existingName) {
+    const extracted = extractName(messages);
+    if (extracted) {
+      await db.from("users").update({ name: extracted }).eq("id", userId);
+    }
+  }
 
   if (subscriptionStatus !== "pro") {
     const rate = await checkDailyMessageLimit(userId);
@@ -492,11 +500,7 @@ export async function POST(req: NextRequest) {
               bumpUserCounters: true,
             });
 
-            const firstUserMessage = messages.find((m) => m.role === "user")
-              ?.content;
-            const extracted = firstUserMessage
-              ? extractName(firstUserMessage)
-              : null;
+            const extracted = extractName(messages);
             const update: {
               onboarding_complete: boolean;
               onboarding_summary?: string | null;

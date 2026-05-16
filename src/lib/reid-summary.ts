@@ -112,16 +112,26 @@ export function summaryForHome(close: OnboardingClose): string | null {
   return close.body.trim() || null;
 }
 
-/** Pulls a likely first name out of an early user message — "I'm Theo",
- *  "my name is Theo", "I am Theo", "it's Theo". Captures the first
- *  capitalized-looking token after the prefix. Returns null on no match. */
-export function extractName(firstUserMessage: string): string | null {
-  if (!firstUserMessage) return null;
-  const m = firstUserMessage
-    .trim()
-    .match(/^(?:i'?m|my\s+name\s+is|i\s+am|it'?s)\s+([A-Z][a-z]+)/i);
-  if (!m) return null;
-  const raw = m[1];
-  // Normalize casing — store as "Theo" not "theo" or "THEO".
-  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+export function extractName(input: string | Array<{ role: string; content: string }>): string | null {
+  const messages = typeof input === "string"
+    ? [{ role: "user" as const, content: input }]
+    : input.filter((m) => m.role === "user").slice(0, 4);
+
+  for (const msg of messages) {
+    if (!msg.content) continue;
+    const text = msg.content.trim();
+    const phraseMatch = text.match(
+      /(?:^|\s)(?:i'?m|i am|my name(?:'s| is)|it'?s|call me)\s+([A-Z][a-z]{1,20})/i,
+    );
+    if (phraseMatch) {
+      const raw = phraseMatch[1];
+      return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    }
+    const firstWord = text.match(/^([A-Z][a-z]{1,20})[.,!\s]/);
+    if (firstWord && !["The", "My", "Hi", "Hey", "So", "Ok"].includes(firstWord[1])) {
+      const raw = firstWord[1];
+      return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    }
+  }
+  return null;
 }
