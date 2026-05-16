@@ -1,6 +1,6 @@
 "use client";
 import { ArrowUp } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function ChatInput({
   onSubmit,
@@ -12,6 +12,14 @@ export default function ChatInput({
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canSend = !!value.trim() && !disabled;
+
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!disabled) textareaRef.current?.focus();
+  }, [disabled]);
 
   function autoresize(el: HTMLTextAreaElement) {
     el.style.height = "auto";
@@ -29,8 +37,22 @@ export default function ChatInput({
   }
 
   return (
-    <div className="py-4">
-      <div className="input-bar flex items-end gap-3 px-5 py-4">
+    <div
+      // Fixed at the bottom of the viewport so messages scroll under the input.
+      // On mobile, the AppShell bottom nav (h=64px + safe-area inset) is also
+      // fixed; this Tailwind arbitrary class places the input ABOVE the nav on
+      // screens <768px and flush with the viewport bottom on md+ (and on
+      // /onboarding, which is outside the (app) group and has no bottom nav).
+      className="fixed left-0 right-0 z-50 bottom-[calc(64px+env(safe-area-inset-bottom))] md:bottom-0"
+      style={{
+        background: "rgba(10,22,40,0.96)",
+        backdropFilter: "blur(24px)",
+        WebkitBackdropFilter: "blur(24px)",
+        borderTop: "1px solid rgba(242,237,232,0.06)",
+        padding: "16px 24px 32px",
+      }}
+    >
+      <div className="input-bar flex items-end gap-3 px-5 py-4 mx-auto max-w-[720px]">
         <textarea
           ref={textareaRef}
           rows={1}

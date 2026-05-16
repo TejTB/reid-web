@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import LogoMark from "@/components/LogoMark";
 import ProgressDots from "@/components/ProgressDots";
 import ChatStream from "@/components/ChatStream";
@@ -11,10 +10,10 @@ import {
   ensureUserId,
   setUserName,
   markOnboardingComplete,
+  setOnboardedFlag,
 } from "@/lib/session";
+import { parseOnboardingClose, summaryForHome } from "@/lib/reid-summary";
 import type { Message } from "@/types/chat";
-
-const SENTINEL = "[ONBOARDING_COMPLETE]";
 
 function extractName(raw: string): string | null {
   const cleaned = raw
@@ -26,14 +25,7 @@ function extractName(raw: string): string | null {
   return cleaned;
 }
 
-// Reid's closing message is summary -> assessment -> task. Persist the
-// non-empty body (everything before the sentinel) as the onboarding summary.
-function extractSummary(closingMessage: string): string {
-  return closingMessage.replace(SENTINEL, "").trim();
-}
-
 export default function OnboardingClient() {
-  const router = useRouter();
   const [userId, setUserId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
@@ -47,14 +39,26 @@ export default function OnboardingClient() {
 
   const userTurnCount = messages.filter((m) => m.role === "user").length;
 
-  function triggerCompletion(idForRequest: string, cleaned: string) {
+  async function triggerCompletion(
+    idForRequest: string,
+    rawAssistantText: string,
+  ) {
     if (completionTriggered.current) return;
     completionTriggered.current = true;
-    const summary = extractSummary(cleaned);
-    void markOnboardingComplete(idForRequest, summary || null);
-    // Start fade-out of chat/input immediately. After 700ms (300ms input
-    // fade + 400ms more for messages-fade overlap), mount the overlay,
-    // which then plays steps 3+ of the spec (300ms hold, then logo in).
+    const close = parseOnboardingClose(rawAssistantText);
+    const summary = summaryForHome(close);
+    const task = close.task;
+
+    // (a) Set BOTH localStorage flags synchronously. The root page reads these
+    // and is the authoritative redirect gate after onboarding.
+    setOnboardedFlag(idForRequest);
+
+    // (b) Update Supabase users.onboarding_complete=true. Awaited so the
+    // animation only starts once persistence is confirmed. Server may have
+    // already written these on the streaming end hook — this is a fallback.
+    await markOnboardingComplete(idForRequest, summary, task);
+
+    // (c) Animation only begins after (a) and (b) have both completed.
     setIsCompleting(true);
     setTimeout(() => setShowComplete(true), 700);
   }
@@ -63,6 +67,7 @@ export default function OnboardingClient() {
     setIsStreaming(true);
     setStreamingText("");
     let acc = "";
+    let firstAttemptFailed = false;
     try {
       for await (const chunk of streamReid({
         userId: idForRequest,
@@ -73,31 +78,54 @@ export default function OnboardingClient() {
         setStreamingText(acc);
       }
     } catch {
-      const errMsg: Message = {
-        role: "assistant",
-        content: "Reid stumbled — try again.",
-      };
-      setMessages((prev) => [...prev, errMsg]);
+      firstAttemptFailed = true;
+    }
+    if (firstAttemptFailed) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Give me a moment." },
+      ]);
       setStreamingText("");
-      setIsStreaming(false);
-      return;
+      await new Promise((r) => setTimeout(r, 2000));
+      acc = "";
+      try {
+        for await (const chunk of streamReid({
+          userId: idForRequest,
+          mode: "onboarding",
+          messages: seed,
+        })) {
+          acc += chunk;
+          setStreamingText(acc);
+        }
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: "Something's off on my end. Try again.",
+          },
+        ]);
+        setStreamingText("");
+        setIsStreaming(false);
+        return;
+      }
     }
 
-    const hasSentinel = acc.trimEnd().endsWith(SENTINEL);
-    const cleaned = hasSentinel ? acc.replace(SENTINEL, "").trimEnd() : acc;
+    const close = parseOnboardingClose(acc);
+    const cleaned = close.hasSentinel ? close.body : acc;
 
     setMessages((prev) => [...prev, { role: "assistant", content: cleaned }]);
     setStreamingText("");
     setIsStreaming(false);
 
-    if (hasSentinel) {
-      triggerCompletion(idForRequest, cleaned);
+    if (close.hasSentinel) {
+      void triggerCompletion(idForRequest, acc);
       return;
     }
 
     const userTurnsAfter = seed.filter((m) => m.role === "user").length;
     if (userTurnsAfter >= 10) {
-      triggerCompletion(idForRequest, cleaned);
+      void triggerCompletion(idForRequest, acc);
     }
   }
 
@@ -128,16 +156,28 @@ export default function OnboardingClient() {
   }
 
   return (
-    <div className="min-h-screen onboarding-bg flex flex-col">
+    <div className="h-screen overflow-hidden onboarding-bg flex flex-col">
       <header
-        className="flex items-center gap-3"
+        className="flex items-center"
         style={{
           padding: "20px 24px",
+          gap: 10,
           transition: "opacity 300ms ease",
           opacity: isCompleting ? 0 : 1,
         }}
       >
         <LogoMark size={32} />
+        <span
+          style={{
+            fontFamily: "var(--font-serif), serif",
+            fontSize: 19,
+            fontWeight: 600,
+            letterSpacing: "-0.02em",
+            color: "#F2EDE3",
+          }}
+        >
+          Reid
+        </span>
       </header>
       <div
         style={{
@@ -177,9 +217,7 @@ export default function OnboardingClient() {
           />
         </div>
       </div>
-      {showComplete && (
-        <OnboardingComplete onDone={() => router.push("/home")} />
-      )}
+      {showComplete && <OnboardingComplete />}
     </div>
   );
 }

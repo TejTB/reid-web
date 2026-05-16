@@ -38,7 +38,12 @@ export default function NavItem({
         onMouseLeave={() => setHovered(false)}
         className="relative flex items-center"
         style={{
-          padding: "10px 20px",
+          // 2px left border on both active and inactive keeps text alignment
+          // stable when active state toggles (borderLeft sits inside the box).
+          paddingTop: 10,
+          paddingBottom: 10,
+          paddingRight: 14,
+          paddingLeft: 12,
           borderRadius: 8,
           background,
           color,
@@ -52,7 +57,7 @@ export default function NavItem({
         }}
       >
         <Icon
-          size={16}
+          size={15}
           strokeWidth={1.7}
           style={{ marginRight: 10 }}
         />
@@ -64,17 +69,21 @@ export default function NavItem({
   return (
     <Link
       href={href}
-      className={`relative flex flex-col items-center justify-center gap-1 flex-1 py-2 transition-colors ${
-        active
-          ? "text-text-primary"
-          : "text-text-dim hover:text-text-secondary"
-      }`}
+      className="relative flex flex-col items-center justify-center gap-1 flex-1 transition-colors"
+      style={{
+        minHeight: 44,
+        padding: "8px 4px",
+        color: active ? "#B91C1C" : "#7A90A8",
+      }}
     >
       {active && (
-        <span className="absolute top-0 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-accent" />
+        <span
+          className="absolute top-0 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"
+          style={{ background: "#B91C1C" }}
+        />
       )}
-      <Icon size={22} strokeWidth={1.6} />
-      <span className="text-[11px] tracking-wide">{label}</span>
+      <Icon size={20} strokeWidth={1.6} />
+      <span className="text-[10px] font-medium tracking-[0.04em]">{label}</span>
     </Link>
   );
 }

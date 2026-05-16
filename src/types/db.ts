@@ -4,6 +4,7 @@ export interface User {
   name: string | null;
   onboarding_complete: boolean;
   onboarding_summary: string | null;
+  onboarding_task: string | null;
   created_at: string;
 }
 

@@ -1,8 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Home, MessageCircle, Map, ListTodo } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { Home, MessageCircle, Map, ListTodo, Settings } from "lucide-react";
 import LogoMark from "./LogoMark";
 import NavItem from "./NavItem";
+import SettingsModal from "./SettingsModal";
 import { getUserId, getUser } from "@/lib/session";
 
 const NAV = [
@@ -12,8 +14,16 @@ const NAV = [
   { href: "/tasks", label: "Tasks", icon: ListTodo },
 ] as const;
 
+function openSettings() {
+  // Agent 3 will mount a listener that opens the settings modal.
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("reid:open-settings"));
+}
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [name, setName] = useState<string | null>(null);
+  const [settingsHovered, setSettingsHovered] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,7 +44,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col bg-bg-dark">
       <aside
-        className="hidden md:flex fixed inset-y-0 left-0 w-[220px] flex-col z-40"
+        className="hidden md:flex fixed inset-y-0 left-0 w-[224px] flex-col z-40"
         style={{
           background: "rgba(8,18,34,0.98)",
           borderRight: "1px solid rgba(242,237,232,0.06)",
@@ -45,11 +55,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div
           className="flex items-center gap-3"
           style={{
-            padding: "28px 24px 24px",
+            padding: "28px 22px 22px",
             borderBottom: "1px solid rgba(242,237,232,0.06)",
           }}
         >
-          <LogoMark size={30} />
+          <LogoMark size={32} />
           <span
             className="font-serif text-text-primary"
             style={{
@@ -60,11 +70,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           >
             Reid
           </span>
+          <button
+            type="button"
+            onClick={openSettings}
+            onMouseEnter={() => setSettingsHovered(true)}
+            onMouseLeave={() => setSettingsHovered(false)}
+            aria-label="Open settings"
+            className="ml-auto flex items-center justify-center"
+            style={{
+              padding: 8,
+              background: "transparent",
+              border: "none",
+              color: settingsHovered ? "#7A90A8" : "#3A5070",
+              transition: "color 150ms ease",
+              cursor: "pointer",
+              lineHeight: 0,
+            }}
+          >
+            <Settings size={14} strokeWidth={1.7} />
+          </button>
         </div>
 
         <nav
           className="flex flex-col flex-1"
-          style={{ padding: "20px 12px", gap: 2 }}
+          style={{ padding: "16px 10px", gap: 2 }}
         >
           {NAV.map((item) => (
             <NavItem key={item.href} {...item} variant="sidebar" />
@@ -74,7 +103,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div
           className="flex items-center gap-3"
           style={{
-            padding: "20px 24px",
+            padding: "16px 22px",
             borderTop: "1px solid rgba(242,237,232,0.06)",
           }}
         >
@@ -97,18 +126,37 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           >
             {name ?? "Friend"}
           </span>
+          <span
+            aria-hidden
+            style={{
+              marginLeft: "auto",
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: "#22C55E",
+              boxShadow: "0 0 0 2px rgba(34,197,94,0.2)",
+              flexShrink: 0,
+            }}
+          />
         </div>
       </aside>
 
-      <main className="flex-1 md:ml-[220px] pb-20 md:pb-0">
-        <div className="page-enter">{children}</div>
+      <main className="reid-radial flex-1 md:ml-[224px] pb-20 md:pb-0">
+        {/* Keying by pathname forces React to remount this wrapper on each
+            navigation, so the page-enter animation actually fires (otherwise
+            the App Router preserves the wrapper and only swaps `children`). */}
+        <div key={pathname} className="page-enter">
+          {children}
+        </div>
       </main>
 
       <nav
         className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t backdrop-blur-xl"
         style={{
-          background: "rgba(10,22,40,0.95)",
+          background: "rgba(8,18,34,0.98)",
           borderTopColor: "rgba(242,237,232,0.06)",
+          paddingBottom: "env(safe-area-inset-bottom)",
+          minHeight: 64,
         }}
       >
         <div className="mx-auto max-w-[680px] flex items-stretch px-2 py-1">
@@ -117,6 +165,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </div>
       </nav>
+
+      {/* Globally mounted — listens for the `reid:open-settings` event the
+          sidebar gear dispatches, regardless of which (app) route is active. */}
+      <SettingsModal />
     </div>
   );
 }

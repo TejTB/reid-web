@@ -6,14 +6,13 @@ import {
   CHAT_SYSTEM,
 } from "@/lib/anthropic";
 import { supabase } from "@/lib/supabase";
+import { parseOnboardingClose, summaryForHome } from "@/lib/reid-summary";
 
 type ReidRequest = {
   userId: string;
   mode: "onboarding" | "chat";
   messages: { role: "user" | "assistant"; content: string }[];
 };
-
-const SENTINEL = "[ONBOARDING_COMPLETE]";
 
 export async function POST(req: NextRequest) {
   let body: ReidRequest;
@@ -43,10 +42,33 @@ export async function POST(req: NextRequest) {
       .insert({ user_id: userId, role: "user", content: lastMessage.content });
   }
 
-  const systemPrompt = mode === "onboarding" ? ONBOARDING_SYSTEM : CHAT_SYSTEM;
+  let systemPrompt = mode === "onboarding" ? ONBOARDING_SYSTEM : CHAT_SYSTEM;
+
+  // Context-aware chat opener: when starting a new chat session with no
+  // history, pull the user's name and onboarding summary so Reid's first
+  // message knows who they are and what came up in onboarding.
+  if (mode === "chat" && messages.length === 0) {
+    const { data: profile } = await supabase
+      .from("users")
+      .select("name, onboarding_summary")
+      .eq("id", userId)
+      .maybeSingle();
+    const parts: string[] = [];
+    if (profile?.name) parts.push(`Their name is ${profile.name}.`);
+    if (profile?.onboarding_summary) {
+      parts.push(
+        `Here is what you wrote at the close of onboarding:\n${profile.onboarding_summary}`,
+      );
+    }
+    if (parts.length > 0) {
+      systemPrompt = `${CHAT_SYSTEM}\n\nContext on the user you are about to greet:\n${parts.join(
+        "\n\n",
+      )}\n\nOpen this session with a single short message — pick up where onboarding left off. One sharp question or one concrete next step. Do not greet with their name unless it earns its weight.`;
+    }
+  }
 
   const upstreamMessages =
-    messages.length === 0 && mode === "onboarding"
+    messages.length === 0
       ? [{ role: "user" as const, content: "Begin." }]
       : messages;
 
@@ -79,10 +101,8 @@ export async function POST(req: NextRequest) {
             )
             .join("");
 
-          const hasSentinel = assistantText.includes(SENTINEL);
-          const cleaned = hasSentinel
-            ? assistantText.replace(SENTINEL, "").trim()
-            : assistantText;
+          const close = parseOnboardingClose(assistantText);
+          const cleaned = close.hasSentinel ? close.body : assistantText;
 
           // Persist conversation without the sentinel — readers (chat history,
           // future analytics) should never see the control token in the body.
@@ -95,15 +115,17 @@ export async function POST(req: NextRequest) {
             });
 
           // Server-authoritative completion: if Reid emitted the sentinel,
-          // persist the summary body and flip onboarding_complete here, so
+          // persist the summary + task and flip onboarding_complete here, so
           // we don't depend on the client surviving the round trip.
-          if (mode === "onboarding" && hasSentinel) {
-            const summary = cleaned.length > 0 ? cleaned : null;
+          if (mode === "onboarding" && close.hasSentinel) {
+            const summary = summaryForHome(close);
             const update: {
               onboarding_complete: boolean;
-              onboarding_summary?: string;
+              onboarding_summary?: string | null;
+              onboarding_task?: string | null;
             } = { onboarding_complete: true };
             if (summary) update.onboarding_summary = summary;
+            if (close.task) update.onboarding_task = close.task;
             await supabase.from("users").update(update).eq("id", userId);
           }
         } catch {
