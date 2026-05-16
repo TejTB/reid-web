@@ -16,8 +16,47 @@ function greeting() {
 
 type LoadedUser = Pick<
   User,
-  "id" | "name" | "onboarding_complete" | "onboarding_summary" | "onboarding_task"
+  | "id"
+  | "name"
+  | "onboarding_complete"
+  | "onboarding_summary"
+  | "onboarding_task"
+  | "last_session_at"
+  | "session_count"
+  | "streak_days"
 >;
+
+// Bucketed milestone copy for the momentum bar — the visual bar caps at 100%
+// but the label keeps progressing past 10 sessions.
+function milestoneFor(sessionCount: number): string {
+  if (sessionCount <= 2) return "Getting started";
+  if (sessionCount <= 4) return "Building momentum";
+  if (sessionCount <= 9) return "Pattern emerging";
+  return "First checkpoint";
+}
+
+// "Active today" / "{n} day streak" / "Last active {n} days ago".
+// Streak text is intentionally restrained — no fire emoji, no bold weight.
+function streakTextFor(user: LoadedUser, now: Date = new Date()): string | null {
+  const last = user.last_session_at ? new Date(user.last_session_at) : null;
+  if (last && !Number.isNaN(last.getTime())) {
+    const sameDay =
+      last.getFullYear() === now.getFullYear() &&
+      last.getMonth() === now.getMonth() &&
+      last.getDate() === now.getDate();
+    if (sameDay) return "Active today";
+  }
+  if ((user.streak_days ?? 0) > 1) return `${user.streak_days} day streak`;
+  if (last && !Number.isNaN(last.getTime())) {
+    const dayMs = 1000 * 60 * 60 * 24;
+    const days = Math.max(
+      1,
+      Math.floor((now.getTime() - last.getTime()) / dayMs),
+    );
+    return `Last active ${days} day${days === 1 ? "" : "s"} ago`;
+  }
+  return null;
+}
 
 export default function HomePage() {
   const router = useRouter();
@@ -40,9 +79,9 @@ export default function HomePage() {
         return;
       }
       setUser(u);
-      // Load task-done flag for this user.
+      // Task 0 is the onboarding task — tasks page uses the same index.
       try {
-        const stored = localStorage.getItem(`reid:task:${id}:done`);
+        const stored = localStorage.getItem(`reid:task:${id}:0:done`);
         setTaskDone(stored === "true");
       } catch {
         setTaskDone(false);
@@ -67,13 +106,20 @@ export default function HomePage() {
   const summary = user?.onboarding_summary?.trim() ?? "";
   const task = user?.onboarding_task?.trim() ?? "";
   const greetName = user?.name?.trim() || "there";
+  const sessionCount = user?.session_count ?? 0;
+  const streakText = user ? streakTextFor(user) : null;
+  const milestoneLabel = milestoneFor(sessionCount);
+  const progressPct = Math.min(100, (sessionCount / 10) * 100);
 
   function toggleTask() {
     if (!user) return;
     const next = !taskDone;
     setTaskDone(next);
     try {
-      localStorage.setItem(`reid:task:${user.id}:done`, next ? "true" : "false");
+      localStorage.setItem(
+        `reid:task:${user.id}:0:done`,
+        next ? "true" : "false",
+      );
     } catch {
       // localStorage unavailable; in-memory state still reflects the toggle.
     }
@@ -106,6 +152,14 @@ export default function HomePage() {
         >
           Here&apos;s where things stand.
         </p>
+        {sessionCount > 0 && streakText && (
+          <p
+            className="font-sans text-text-dim text-sm"
+            style={{ marginTop: 12, fontWeight: 400 }}
+          >
+            Session {sessionCount} · {streakText}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-4" style={{ marginTop: 48 }}>
@@ -123,9 +177,22 @@ export default function HomePage() {
                 className="font-sans"
                 style={{ fontSize: 15, color: "#7A90A8" }}
               >
-                Complete your first conversation with Reid to see your focus.
+                Complete your first session with Reid.
               </p>
             )}
+            {/* Momentum bar — caps visually at 100%, milestone label keeps
+                progressing for sessions ≥ 10. */}
+            <div className="mt-4">
+              <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-accent transition-all duration-500"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-text-dim font-sans">
+                Session {sessionCount} of 10 — {milestoneLabel}
+              </p>
+            </div>
           </GlassCard>
         </div>
 
@@ -180,7 +247,7 @@ export default function HomePage() {
                 className="font-sans"
                 style={{ fontSize: 15, color: "#7A90A8" }}
               >
-                Reid will assign your first task in your next session.
+                Reid will assign your task at the end of your next session.
               </p>
             )}
           </GlassCard>

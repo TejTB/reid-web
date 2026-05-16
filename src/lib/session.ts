@@ -1,6 +1,6 @@
 "use client";
 import { supabase } from "./supabase";
-import type { User } from "@/types/db";
+import type { Session, User } from "@/types/db";
 
 const KEY = "reid:userId";
 const ONBOARDED_KEY = "reid:onboarded";
@@ -25,6 +25,19 @@ export function clearSession(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(KEY);
   localStorage.removeItem(ONBOARDED_KEY);
+  // Also wipe per-task done flags — leftover flags from the previous session
+  // would otherwise resurrect (in /tasks or /home) once a new user reaches a
+  // task with the same id under a fresh userId.
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("reid:task:")) stale.push(k);
+    }
+    for (const k of stale) localStorage.removeItem(k);
+  } catch {
+    // ignore — best-effort cleanup
+  }
 }
 
 export function ensureUserId(): string {
@@ -100,4 +113,19 @@ export function persistUserId(userId: string): void {
   if (typeof window === "undefined") return;
   if (!userId) return;
   localStorage.setItem(KEY, userId);
+}
+
+/** Client-side mirror of `getSessions` from `session-server.ts`. Used by the
+ *  /plan page to render the timeline directly from the browser — RLS on
+ *  public.sessions is anon-permissive, so no server round-trip is needed. */
+export async function getSessions(userId: string): Promise<Session[]> {
+  const { data, error } = await supabase
+    .from("sessions")
+    .select(
+      "id, user_id, started_at, ended_at, summary, task_set, message_count",
+    )
+    .eq("user_id", userId)
+    .order("started_at", { ascending: false });
+  if (error || !data) return [];
+  return data as Session[];
 }
