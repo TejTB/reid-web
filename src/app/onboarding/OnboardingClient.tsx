@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import LogoMark from "@/components/LogoMark";
 import ProgressDots from "@/components/ProgressDots";
 import ChatStream from "@/components/ChatStream";
@@ -26,6 +27,7 @@ function extractName(raw: string): string | null {
 }
 
 export default function OnboardingClient() {
+  const router = useRouter();
   const [userId, setUserId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
@@ -68,6 +70,7 @@ export default function OnboardingClient() {
     // (d) Animation only begins after (a)–(c) have all completed.
     setIsCompleting(true);
     setTimeout(() => setShowComplete(true), 700);
+    setTimeout(() => router.replace("/home"), 2500);
   }
 
   async function runStream(seed: Message[], idForRequest: string) {
