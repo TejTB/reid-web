@@ -2,26 +2,46 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import LogoMark from "@/components/LogoMark";
-import ProgressDots from "@/components/ProgressDots";
+import ProgressLine from "@/components/ProgressLine";
 import ChatStream from "@/components/ChatStream";
 import ChatInput from "@/components/ChatInput";
 import OnboardingComplete from "@/components/OnboardingComplete";
+import OnboardingIntro from "@/components/OnboardingIntro";
 import { useAuth } from "@/components/AuthProvider";
 import { streamReid } from "@/lib/reid";
 import { parseOnboardingClose } from "@/lib/reid-summary";
 import type { Message } from "@/types/chat";
 
+// Onboarding has three stages:
+//   intro  — pre-chat hero (logomark, copy, "Ready →" CTA). Sets the tone
+//            before Reid starts asking questions.
+//   chat   — the conversation surface. Mirrors /chat but with a progress
+//            line replacing the session header.
+//   --     — when Reid emits [ONBOARDING_COMPLETE], OnboardingClient flips
+//            isCompleting + showComplete and lets OnboardingComplete play
+//            the 5-second cinematic before /home.
+//
+// A mid-flow refresh re-shows the intro because the client doesn't restore
+// the in-progress conversation — Reid always restarts from `seed: []`. The
+// fresh hero is consistent with that fresh-start behaviour.
+
+type Stage = "intro" | "chat";
+
 export default function OnboardingClient() {
   const router = useRouter();
   const { me, loading: authLoading, refresh } = useAuth();
+  const [stage, setStage] = useState<Stage>("intro");
+  // While true, OnboardingIntro fades out before we unmount it — keeps the
+  // hand-off from intro → chat from popping.
+  const [introExiting, setIntroExiting] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  // Two stage completion: first fade chat + input, then mount the overlay.
+  // Two-stage completion: first fade chat + input, then mount the overlay.
   const [isCompleting, setIsCompleting] = useState(false);
   const [showComplete, setShowComplete] = useState(false);
   const completionTriggered = useRef(false);
-  const initialized = useRef(false);
+  const streamStarted = useRef(false);
 
   const userTurnCount = messages.filter((m) => m.role === "user").length;
 
@@ -119,6 +139,8 @@ export default function OnboardingClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.onboarding_complete]);
 
+  // Auth gate. Unsigned → /login. Already onboarded → /home. Otherwise
+  // stay here and let stage default to "intro".
   useEffect(() => {
     if (authLoading) return;
     if (!me) {
@@ -127,13 +149,29 @@ export default function OnboardingClient() {
     }
     if (me.onboarding_complete) {
       router.replace("/home");
-      return;
     }
-    if (initialized.current) return;
-    initialized.current = true;
+  }, [authLoading, me, router]);
+
+  // Kick off Reid's opener the first time we enter the chat stage, no matter
+  // whether the user clicked Ready or we auto-advanced. Re-renders don't
+  // restart it — guarded by streamStarted.
+  useEffect(() => {
+    if (stage !== "chat") return;
+    if (streamStarted.current) return;
+    streamStarted.current = true;
     void runStream([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, me, router]);
+  }, [stage]);
+
+  function handleBegin() {
+    setIntroExiting(true);
+    // Wait for the intro fade-out to finish before unmounting, then flip the
+    // chat stage in. The chat surface fades in via its own .page-enter
+    // animation (see globals.css).
+    window.setTimeout(() => {
+      setStage("chat");
+    }, 300);
+  }
 
   async function handleSend(content: string) {
     if (!me || isStreaming || isCompleting) return;
@@ -144,6 +182,21 @@ export default function OnboardingClient() {
     ];
     setMessages(nextMessages);
     await runStream(nextMessages);
+  }
+
+  if (authLoading || !me) {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: "#0A1628" }}
+      >
+        <LogoMark size={48} />
+      </div>
+    );
+  }
+
+  if (stage === "intro") {
+    return <OnboardingIntro onBegin={handleBegin} exiting={introExiting} />;
   }
 
   return (
@@ -161,7 +214,7 @@ export default function OnboardingClient() {
       <header
         className="flex items-center"
         style={{
-          padding: "20px 24px",
+          padding: "20px 24px 14px",
           gap: 10,
           transition: "opacity 300ms ease",
           opacity: isCompleting ? 0 : 1,
@@ -184,9 +237,10 @@ export default function OnboardingClient() {
         style={{
           transition: "opacity 300ms ease",
           opacity: isCompleting ? 0 : 1,
+          paddingBottom: 6,
         }}
       >
-        <ProgressDots total={10} current={Math.min(userTurnCount, 10)} />
+        <ProgressLine current={Math.min(userTurnCount, 10)} total={10} />
       </div>
       <ChatStream
         messages={messages}
