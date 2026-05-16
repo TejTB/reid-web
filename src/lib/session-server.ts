@@ -8,6 +8,18 @@
 import { supabase } from "./supabase";
 import type { Message, Session } from "@/types/db";
 
+/** Shape of a single goal item captured during onboarding. The Reid model
+ *  emits these as JSON in the onboarding-complete sentinel; we accept them
+ *  here for bulk insert. */
+export interface OnboardingGoalInput {
+  title: string;
+  target_value: number;
+  unit: string;
+  unit_prefix?: string | null;
+  deadline?: string | null;
+  is_primary?: boolean;
+}
+
 /** Returns the user's sessions, newest first, with the seven columns the
  *  UI cares about. */
 export async function getSessions(userId: string): Promise<Session[]> {
@@ -193,4 +205,90 @@ export async function sessionBelongsTo(
     .eq("id", sessionId)
     .maybeSingle();
   return !!data && data.user_id === userId;
+}
+
+/** Records a goal_event, advances the goal's current_value, and stamps
+ *  completed_at the first time current_value crosses target_value. Returns
+ *  true on success.
+ *
+ *  No transactions — supabase-js with anon RLS can't open one. This is a
+ *  best-effort pipeline that matches the rest of the codebase: insert the
+ *  event, read the goal, compute the new value, write it back. Concurrent
+ *  deltas on the same goal could miscount, which is fine for the current
+ *  single-device usage model. */
+export async function applyGoalDelta(
+  goalId: string,
+  userId: string,
+  sessionId: string | null,
+  delta: number,
+  note: string | null,
+): Promise<boolean> {
+  if (!goalId || !userId) return false;
+
+  const { error: eventError } = await supabase.from("goal_events").insert({
+    goal_id: goalId,
+    user_id: userId,
+    session_id: sessionId,
+    delta,
+    note: note ?? null,
+  });
+  if (eventError) return false;
+
+  const { data: goal, error: readError } = await supabase
+    .from("goals")
+    .select("current_value, target_value, completed_at")
+    .eq("id", goalId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (readError || !goal) return false;
+
+  const current = Number(goal.current_value ?? 0);
+  const target = Number(goal.target_value ?? 0);
+  const newValue = Math.max(0, current + delta);
+
+  const update: Record<string, unknown> = { current_value: newValue };
+  if (newValue >= target && !goal.completed_at) {
+    update.completed_at = new Date().toISOString();
+  }
+
+  const { error: updateError } = await supabase
+    .from("goals")
+    .update(update)
+    .eq("id", goalId)
+    .eq("user_id", userId);
+  return !updateError;
+}
+
+/** Bulk-inserts the goals captured during onboarding. Enforces "at most one
+ *  primary": if multiple inputs are flagged is_primary, the first marked
+ *  primary keeps the flag and the rest are downgraded. Returns true on
+ *  success (or true vacuously if the input is empty). */
+export async function createGoalsFromOnboarding(
+  userId: string,
+  goalsJson: OnboardingGoalInput[],
+): Promise<boolean> {
+  if (!userId) return false;
+  if (!Array.isArray(goalsJson) || goalsJson.length === 0) return true;
+
+  let primarySeen = false;
+  const rows = goalsJson.map((g) => {
+    const wantsPrimary = g.is_primary === true;
+    let isPrimary = false;
+    if (wantsPrimary && !primarySeen) {
+      isPrimary = true;
+      primarySeen = true;
+    }
+    return {
+      user_id: userId,
+      title: g.title,
+      target_value: g.target_value,
+      unit: g.unit,
+      unit_prefix: g.unit_prefix ?? null,
+      deadline: g.deadline ?? null,
+      is_primary: isPrimary,
+    };
+  });
+
+  const { error } = await supabase.from("goals").insert(rows);
+  return !error;
 }

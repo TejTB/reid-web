@@ -1,6 +1,6 @@
 "use client";
 import { supabase } from "./supabase";
-import type { Session, User } from "@/types/db";
+import type { Goal, GoalEvent, Session, User } from "@/types/db";
 
 const KEY = "reid:userId";
 const ONBOARDED_KEY = "reid:onboarded";
@@ -150,4 +150,54 @@ export async function getSessions(userId: string): Promise<Session[]> {
     .order("started_at", { ascending: false });
   if (error || !data) return [];
   return data as Session[];
+}
+
+/** Returns the user's goals — primary first, then oldest first. RLS on
+ *  public.goals is anon-permissive so this can run from the browser. */
+export async function getGoals(userId: string): Promise<Goal[]> {
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from("goals")
+    .select(
+      "id, user_id, title, target_value, current_value, unit, unit_prefix, deadline, is_primary, completed_at, created_at, updated_at",
+    )
+    .eq("user_id", userId)
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true });
+  if (error || !data) return [];
+  return data as Goal[];
+}
+
+/** Returns the most recent goal events for a user with the parent goal's
+ *  title pre-joined, so callers don't need a second round-trip. Each row is
+ *  flattened to a `GoalEvent & { goal_title: string }`. */
+export async function getGoalEvents(
+  userId: string,
+  limit: number = 20,
+): Promise<(GoalEvent & { goal_title: string })[]> {
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from("goal_events")
+    .select(
+      "id, goal_id, user_id, session_id, delta, note, created_at, goals(title)",
+    )
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error || !data) return [];
+  return data.map((e) => {
+    // supabase-js types embedded relations as an array even when it's a
+    // single row; cast through the actual shape we know we get back.
+    const joined = e.goals as unknown as { title: string } | null;
+    return {
+      id: e.id as string,
+      goal_id: e.goal_id as string,
+      user_id: e.user_id as string,
+      session_id: (e.session_id as string | null) ?? null,
+      delta: e.delta as number,
+      note: (e.note as string | null) ?? null,
+      created_at: e.created_at as string,
+      goal_title: joined?.title ?? "",
+    };
+  });
 }
