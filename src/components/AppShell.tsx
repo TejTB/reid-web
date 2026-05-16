@@ -5,6 +5,7 @@ import { Home, MessageCircle, Map, ListTodo, Settings, Target } from "lucide-rea
 import LogoMark from "./LogoMark";
 import NavItem from "./NavItem";
 import SettingsModal from "./SettingsModal";
+import PaywallModal from "./PaywallModal";
 import { useMe } from "./AuthProvider";
 
 const NAV = [
@@ -154,6 +155,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Globally mounted — listens for the `reid:open-settings` event the
           sidebar gear dispatches, regardless of which (app) route is active. */}
       <SettingsModal />
+      {/* Globally mounted — opens on the `reid:open-paywall` event the chat
+          page fires when /api/reid returns 429 daily_limit_exceeded, and on
+          Settings → Upgrade to Pro. */}
+      <PaywallModal />
     </div>
   );
 }

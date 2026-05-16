@@ -5,7 +5,7 @@ import ChatStream from "@/components/ChatStream";
 import ChatInput from "@/components/ChatInput";
 import LogoMark from "@/components/LogoMark";
 import { useAuth } from "@/components/AuthProvider";
-import { streamReid } from "@/lib/reid";
+import { streamReid, DailyLimitError } from "@/lib/reid";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
 import type { Message } from "@/types/chat";
@@ -58,7 +58,22 @@ export default function ChatPage() {
           setStreamingText(acc);
         }
         return { ok: true, text: acc, sessionId: resolvedSessionId };
-      } catch {
+      } catch (err) {
+        // Paywall: 429 daily_limit_exceeded opens the upgrade modal and
+        // rolls back the optimistic user turn — no retry, no "Give me a
+        // moment" placeholder.
+        if (err instanceof DailyLimitError) {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("reid:open-paywall"));
+          }
+          setMessages((prev) => prev.slice(0, -1));
+          setStreamingText("");
+          return {
+            ok: false,
+            text: "",
+            sessionId: resolvedSessionId,
+          };
+        }
         setMessages((prev) => [
           ...prev,
           { role: "assistant", content: "Give me a moment." },
@@ -79,7 +94,12 @@ export default function ChatPage() {
             setStreamingText(acc);
           }
           return { ok: true, text: acc, sessionId: resolvedSessionId };
-        } catch {
+        } catch (retryErr) {
+          if (retryErr instanceof DailyLimitError) {
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("reid:open-paywall"));
+            }
+          }
           return { ok: false, text: "", sessionId: resolvedSessionId };
         }
       }

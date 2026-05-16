@@ -7,6 +7,7 @@ const PUBLIC_PATHS = [
   "/auth/error",
   "/api/push/vapid",
   "/api/notifications/trigger",
+  "/api/stripe/webhook",
 ];
 
 function isPublicPath(pathname: string): boolean {

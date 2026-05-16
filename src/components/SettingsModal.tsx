@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "@/lib/session";
+import { useMe } from "./AuthProvider";
 
 // Mounted once globally (inside AppShell). Listens for the `reid:open-settings`
 // CustomEvent dispatched by the sidebar gear button and renders a centered
@@ -17,11 +18,17 @@ import { signOut } from "@/lib/session";
 // Closing the modal at any point resets the confirm state.
 export default function SettingsModal() {
   const router = useRouter();
+  const me = useMe();
+  const status = me?.subscription_status ?? "free";
+  const isPro = status === "pro";
+  const isPastDue = status === "past_due";
   const [open, setOpen] = useState(false);
   // Drives the entrance opacity/translateY transition. We mount when `open`
   // flips true, then flip `visible` next frame so the transition runs.
   const [visible, setVisible] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [portalPending, setPortalPending] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
 
   const close = useCallback(() => {
     setVisible(false);
@@ -67,6 +74,34 @@ export default function SettingsModal() {
     await signOut();
     router.replace("/login");
     router.refresh();
+  }
+
+  async function onBillingClick() {
+    if (portalPending) return;
+    if (!isPro) {
+      // Free / cancelled / past_due (without portal access) → open paywall.
+      // We close the settings modal first so they're not stacked.
+      close();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("reid:open-paywall"));
+      }
+      return;
+    }
+    setPortalPending(true);
+    setBillingError(null);
+    try {
+      const res = await fetch("/api/stripe/portal", { method: "POST" });
+      const body = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !body.url) {
+        setBillingError("Couldn't open the billing portal. Try again.");
+        setPortalPending(false);
+        return;
+      }
+      window.location.assign(body.url);
+    } catch {
+      setBillingError("Couldn't open the billing portal. Try again.");
+      setPortalPending(false);
+    }
   }
 
   if (!open) return null;
@@ -117,7 +152,7 @@ export default function SettingsModal() {
           style={{
             fontSize: 14,
             color: "#7A90A8",
-            marginBottom: 28,
+            marginBottom: confirming ? 28 : 20,
             lineHeight: 1.6,
           }}
         >
@@ -125,6 +160,69 @@ export default function SettingsModal() {
             ? "This signs you out of this device and returns you to the sign-in screen. Your data stays in your account."
             : "Your conversations are saved to your account. Signing out only ends this session on this device."}
         </p>
+
+        {!confirming && (
+          <div
+            className="flex flex-col"
+            style={{
+              gap: 10,
+              marginBottom: 24,
+              padding: "14px 16px",
+              borderRadius: 9,
+              border: "1px solid rgba(255,255,255,0.06)",
+              background: "rgba(255,255,255,0.02)",
+            }}
+          >
+            <div className="flex items-center justify-between" style={{ gap: 8 }}>
+              <span
+                className="font-sans"
+                style={{ fontSize: 13, color: "#C8D5E3" }}
+              >
+                {isPro
+                  ? "Reid Pro — unlimited"
+                  : isPastDue
+                  ? "Payment failed"
+                  : "Free — 20 messages a day"}
+              </span>
+              <button
+                type="button"
+                onClick={onBillingClick}
+                disabled={portalPending}
+                className="font-sans"
+                style={{
+                  fontSize: 12,
+                  color: "#F2EDE3",
+                  background: isPro
+                    ? "transparent"
+                    : "#B91C1C",
+                  border: isPro
+                    ? "1px solid rgba(255,255,255,0.12)"
+                    : "none",
+                  borderRadius: 7,
+                  padding: "6px 12px",
+                  cursor: portalPending ? "default" : "pointer",
+                  opacity: portalPending ? 0.6 : 1,
+                  transition: "background 150ms ease",
+                }}
+              >
+                {portalPending
+                  ? "Opening…"
+                  : isPro
+                  ? "Manage"
+                  : "Upgrade to Pro"}
+              </button>
+            </div>
+            {billingError && (
+              <p
+                className="font-sans"
+                style={{ fontSize: 12, color: "#F87171", margin: 0 }}
+              >
+                {billingError}
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="flex" style={{ gap: 12 }}>
           <button
             type="button"
