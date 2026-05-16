@@ -63,6 +63,9 @@ export default function HomePage() {
   const [user, setUser] = useState<LoadedUser | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [taskDone, setTaskDone] = useState(false);
+  // True when getUser threw or returned in an unrecoverable state and the user
+  // wasn't redirected away to /onboarding. Drives the inline error fallback.
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,26 +75,49 @@ export default function HomePage() {
         router.replace("/onboarding");
         return;
       }
-      const u = await getUser(id);
-      if (cancelled) return;
-      if (!u || u.onboarding_complete === false) {
-        router.replace("/onboarding");
-        return;
-      }
-      setUser(u);
-      // Task 0 is the onboarding task — tasks page uses the same index.
       try {
-        const stored = localStorage.getItem(`reid:task:${id}:0:done`);
-        setTaskDone(stored === "true");
+        const u = await getUser(id);
+        if (cancelled) return;
+        if (!u || u.onboarding_complete === false) {
+          router.replace("/onboarding");
+          return;
+        }
+        setUser(u);
+        // Task 0 is the onboarding task — tasks page uses the same index.
+        try {
+          const stored = localStorage.getItem(`reid:task:${id}:0:done`);
+          setTaskDone(stored === "true");
+        } catch {
+          setTaskDone(false);
+        }
+        setLoaded(true);
       } catch {
-        setTaskDone(false);
+        if (cancelled) return;
+        setError(true);
+        setLoaded(true);
       }
-      setLoaded(true);
     })();
     return () => {
       cancelled = true;
     };
   }, [router]);
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center pt-32 gap-4">
+        <p className="font-serif italic text-text-dim text-lg">
+          Something went wrong.
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="text-sm text-accent underline font-sans"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   if (!loaded) {
     return (

@@ -25,6 +25,10 @@ export default function ChatPage() {
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // True when the initial mount-time bootstrap (resolve userId, hydrate
+  // user, fetch history for the active chat session) throws unrecoverably.
+  // Surfaces the inline "Something went wrong" fallback.
+  const [bootstrapError, setBootstrapError] = useState(false);
   // Snapshot at mount of the user's last_session_at from public.users. This is
   // the *prior* session timestamp — it does NOT reflect activity in the
   // session that begins on this page load. Used by the header subtitle.
@@ -101,10 +105,17 @@ export default function ChatPage() {
       }
       setUserId(id);
 
-      // last_session_at drives the "Last session: …" subtitle and is
-      // captured BEFORE this visit so it always points at a prior session.
-      const user = await getUser(id);
-      setLastSessionAt(user?.last_session_at ?? null);
+      try {
+        // last_session_at drives the "Last session: …" subtitle and is
+        // captured BEFORE this visit so it always points at a prior session.
+        const user = await getUser(id);
+        setLastSessionAt(user?.last_session_at ?? null);
+      } catch {
+        // getUser failure here means we can't show the user — surface it.
+        setBootstrapError(true);
+        setLoaded(true);
+        return;
+      }
 
       // Restore the active chat session id (if any) and load just its
       // messages. The onboarding session is excluded by virtue of the chat
@@ -279,7 +290,20 @@ export default function ChatPage() {
           {subtitle}
         </span>
       </header>
-      {!loaded ? (
+      {bootstrapError ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
+          <p className="font-serif italic text-text-dim text-lg">
+            Something went wrong.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="text-sm text-accent underline font-sans"
+          >
+            Try again
+          </button>
+        </div>
+      ) : !loaded ? (
         <div
           style={{
             flex: 1,
@@ -317,11 +341,13 @@ export default function ChatPage() {
           headerSlot={headerSlot}
         />
       )}
-      <ChatInput
-        onSubmit={handleSend}
-        disabled={isStreaming || !loaded}
-        autofocus={loaded && messages.length === 0 && !isStreaming}
-      />
+      {!bootstrapError && (
+        <ChatInput
+          onSubmit={handleSend}
+          disabled={isStreaming || !loaded}
+          autofocus={loaded && messages.length === 0 && !isStreaming}
+        />
+      )}
     </div>
   );
 }

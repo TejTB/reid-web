@@ -47,6 +47,9 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [doneMap, setDoneMap] = useState<Record<number, boolean>>({});
   const [loaded, setLoaded] = useState(false);
+  // True when the supabase load throws — surfaces the inline "Something
+  // went wrong" fallback in place of the task list.
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,46 +60,57 @@ export default function TasksPage() {
         return;
       }
 
-      const { data } = await supabase
-        .from("users")
-        .select(
-          "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, created_at",
-        )
-        .eq("id", id)
-        .maybeSingle();
-
-      if (cancelled) return;
-
-      const user = data as User | null;
-      const collected: Task[] = [];
-
-      const seedTask = user?.onboarding_task?.trim();
-      if (seedTask) {
-        collected.push({
-          index: 0,
-          text: seedTask,
-          source: "Session 1",
-          assignedDate: formatAssignedDate(user?.created_at),
-        });
-      }
-
-      // Hydrate done flags from localStorage. Keys are
-      // `reid:task:{userId}:{index}:done` — matches /home so toggling on
-      // either screen stays in sync.
-      const map: Record<number, boolean> = {};
       try {
-        for (const t of collected) {
-          map[t.index] =
-            localStorage.getItem(`reid:task:${id}:${t.index}:done`) === "true";
-        }
-      } catch {
-        // localStorage unavailable — assume all undone.
-      }
+        const { data, error: supaError } = await supabase
+          .from("users")
+          .select(
+            "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, created_at",
+          )
+          .eq("id", id)
+          .maybeSingle();
 
-      setUserId(id);
-      setTasks(collected);
-      setDoneMap(map);
-      setLoaded(true);
+        if (cancelled) return;
+        if (supaError) {
+          setError(true);
+          setLoaded(true);
+          return;
+        }
+
+        const user = data as User | null;
+        const collected: Task[] = [];
+
+        const seedTask = user?.onboarding_task?.trim();
+        if (seedTask) {
+          collected.push({
+            index: 0,
+            text: seedTask,
+            source: "Session 1",
+            assignedDate: formatAssignedDate(user?.created_at),
+          });
+        }
+
+        // Hydrate done flags from localStorage. Keys are
+        // `reid:task:{userId}:{index}:done` — matches /home so toggling on
+        // either screen stays in sync.
+        const map: Record<number, boolean> = {};
+        try {
+          for (const t of collected) {
+            map[t.index] =
+              localStorage.getItem(`reid:task:${id}:${t.index}:done`) === "true";
+          }
+        } catch {
+          // localStorage unavailable — assume all undone.
+        }
+
+        setUserId(id);
+        setTasks(collected);
+        setDoneMap(map);
+        setLoaded(true);
+      } catch {
+        if (cancelled) return;
+        setError(true);
+        setLoaded(true);
+      }
     })();
     return () => {
       cancelled = true;
@@ -162,7 +176,20 @@ export default function TasksPage() {
       </header>
 
       <div style={{ marginTop: 32 }}>
-        {!loaded ? (
+        {error ? (
+          <div className="flex flex-col items-center justify-center pt-24 gap-4">
+            <p className="font-serif italic text-text-dim text-lg">
+              Something went wrong.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="text-sm text-accent underline font-sans"
+            >
+              Try again
+            </button>
+          </div>
+        ) : !loaded ? (
           <div className="flex flex-col gap-3">
             <div
               className="rounded-[12px] bg-bg-card animate-skeleton"

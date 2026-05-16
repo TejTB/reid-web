@@ -68,6 +68,9 @@ export default function PlanPage() {
   const [user, setUser] = useState<User | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loaded, setLoaded] = useState(false);
+  // True when the parallel user + sessions load throws — surfaces the
+  // inline "Something went wrong" fallback in place of the timeline.
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,21 +80,27 @@ export default function PlanPage() {
         router.replace("/onboarding");
         return;
       }
-      // Pull user + sessions in parallel — both are anon-RLS, no server roundtrip.
-      const [userRes, sessionRows] = await Promise.all([
-        supabase
-          .from("users")
-          .select(
-            "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, last_session_at, session_count, streak_days, created_at",
-          )
-          .eq("id", id)
-          .maybeSingle(),
-        getSessions(id),
-      ]);
-      if (cancelled) return;
-      setUser((userRes.data as User | null) ?? null);
-      setSessions(sessionRows);
-      setLoaded(true);
+      try {
+        // Pull user + sessions in parallel — both are anon-RLS, no server roundtrip.
+        const [userRes, sessionRows] = await Promise.all([
+          supabase
+            .from("users")
+            .select(
+              "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, last_session_at, session_count, streak_days, created_at",
+            )
+            .eq("id", id)
+            .maybeSingle(),
+          getSessions(id),
+        ]);
+        if (cancelled) return;
+        setUser((userRes.data as User | null) ?? null);
+        setSessions(sessionRows);
+        setLoaded(true);
+      } catch {
+        if (cancelled) return;
+        setError(true);
+        setLoaded(true);
+      }
     })();
     return () => {
       cancelled = true;
@@ -157,7 +166,20 @@ export default function PlanPage() {
         </p>
       </header>
 
-      {!loaded ? (
+      {error ? (
+        <div className="flex flex-col items-center justify-center pt-24 gap-4">
+          <p className="font-serif italic text-text-dim text-lg">
+            Something went wrong.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="text-sm text-accent underline font-sans"
+          >
+            Try again
+          </button>
+        </div>
+      ) : !loaded ? (
         <div className="flex flex-col gap-6">
           <div
             className="rounded-[12px] bg-bg-card animate-skeleton"
