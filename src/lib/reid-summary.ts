@@ -1,22 +1,35 @@
-// Parser for Reid's onboarding-complete closing message. The closing message
-// — when Reid emits the sentinel — has this shape:
+// Parser for Reid's onboarding-complete closing message.
 //
-//   [ONBOARDING_COMPLETE]
-//   Here is what I heard: ...
-//   The real opportunity: ...
-//   Your task for tomorrow: ...
+// Two shapes are accepted:
 //
-// The sentinel is the first line. The three labeled sections follow, in
-// order. Labels may be followed by content on the same line, or on the
-// next line. This parser is forgiving on whitespace + capitalization.
+// 1. New (Sprint 4+) structured one-liner — what Reid emits today:
+//
+//      [ONBOARDING_COMPLETE] summary="…one sentence…" task="…one concrete action…"
+//
+// 2. Legacy labeled block (kept for backward compatibility with historical
+//    conversations already persisted):
+//
+//      [ONBOARDING_COMPLETE]
+//      Here is what I heard: ...
+//      The real opportunity: ...
+//      Your task for tomorrow: ...
+//
+// `summary`/`task` are the canonical fields going forward.
+// `heard`/`opportunity` are populated only when the legacy block is detected.
 
 export const ONBOARDING_SENTINEL = "[ONBOARDING_COMPLETE]";
 
 export type OnboardingClose = {
   hasSentinel: boolean;
-  heard: string | null;
-  opportunity: string | null;
+  /** New canonical one-sentence summary (structured format), or derived from
+   *  the legacy "heard" line when only the old format is present. */
+  summary: string | null;
+  /** Single concrete next action. Populated from either format. */
   task: string | null;
+  /** Legacy: kept so old persisted conversations still parse cleanly. */
+  heard: string | null;
+  /** Legacy: kept so old persisted conversations still parse cleanly. */
+  opportunity: string | null;
   /** Body with sentinel removed, but otherwise unmodified. Falls back to
    *  the whole text when no sentinel is present. */
   body: string;
@@ -33,16 +46,36 @@ export function parseOnboardingClose(text: string): OnboardingClose {
   if (!hasSentinel) {
     return {
       hasSentinel: false,
+      summary: null,
+      task: null,
       heard: null,
       opportunity: null,
-      task: null,
       body,
     };
   }
+
+  // Structured form: summary="…" task="…" — match against the original
+  // trimmed text so we don't depend on label order or whitespace.
+  const summaryMatch = trimmed.match(/summary="([^"]*)"/i);
+  const taskMatchStructured = trimmed.match(/task="([^"]*)"/i);
+  let summary: string | null = summaryMatch ? summaryMatch[1].trim() || null : null;
+  let task: string | null = taskMatchStructured
+    ? taskMatchStructured[1].trim() || null
+    : null;
+
+  // Legacy labeled form — fill in whatever the structured match didn't catch.
   const heard = extractLabeled(body, /here\s+is\s+what\s+i\s+heard:/i);
   const opportunity = extractLabeled(body, /the\s+real\s+opportunity:/i);
-  const task = extractLabeled(body, /your\s+task\s+for\s+tomorrow:/i);
-  return { hasSentinel, heard, opportunity, task, body };
+  const legacyTask = extractLabeled(body, /your\s+task\s+for\s+tomorrow:/i);
+  if (!task && legacyTask) task = legacyTask;
+  if (!summary) {
+    const legacyParts: string[] = [];
+    if (heard) legacyParts.push(heard);
+    if (opportunity) legacyParts.push(opportunity);
+    if (legacyParts.length > 0) summary = legacyParts.join(" ");
+  }
+
+  return { hasSentinel, summary, task, heard, opportunity, body };
 }
 
 function extractLabeled(body: string, label: RegExp): string | null {
@@ -57,13 +90,28 @@ function extractLabeled(body: string, label: RegExp): string | null {
   return slice.trim() || null;
 }
 
-/** Summary string for the home "YOUR FOCUS" card: the heard line plus the
- *  opportunity line, joined by a blank line. Falls back to body if neither
- *  is extractable. */
+/** Summary string for the home "YOUR FOCUS" card. Prefers the new structured
+ *  `summary` field. Falls back to the legacy heard+opportunity pair, then to
+ *  the raw body. */
 export function summaryForHome(close: OnboardingClose): string | null {
+  if (close.summary && close.summary.trim()) return close.summary.trim();
   const parts: string[] = [];
   if (close.heard) parts.push(close.heard);
   if (close.opportunity) parts.push(close.opportunity);
   if (parts.length > 0) return parts.join("\n\n");
   return close.body.trim() || null;
+}
+
+/** Pulls a likely first name out of an early user message — "I'm Theo",
+ *  "my name is Theo", "I am Theo", "it's Theo". Captures the first
+ *  capitalized-looking token after the prefix. Returns null on no match. */
+export function extractName(firstUserMessage: string): string | null {
+  if (!firstUserMessage) return null;
+  const m = firstUserMessage
+    .trim()
+    .match(/^(?:i'?m|my\s+name\s+is|i\s+am|it'?s)\s+([A-Z][a-z]+)/i);
+  if (!m) return null;
+  const raw = m[1];
+  // Normalize casing — store as "Theo" not "theo" or "THEO".
+  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
 }
