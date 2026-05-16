@@ -1,10 +1,11 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Volume2 } from "lucide-react";
 import ChatStream from "@/components/ChatStream";
 import ChatInput from "@/components/ChatInput";
 import LogoMark from "@/components/LogoMark";
-import { useAuth } from "@/components/AuthProvider";
+import { useAuth, useIsPro } from "@/components/AuthProvider";
 import { streamReid, DailyLimitError } from "@/lib/reid";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
@@ -16,12 +17,18 @@ type SessionWithMessages = { session: DbSession; messages: DbMessage[] };
 export default function ChatPage() {
   const router = useRouter();
   const { me, loading: authLoading } = useAuth();
+  const isPro = useIsPro();
   const userId = me?.id ?? "";
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [waveformActive, setWaveformActive] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
   // Reserved for future bootstrap-failure UI; auth/me load lives in
   // AuthProvider now, so the chat page itself has no early-failure surface.
   const bootstrapError = false;
@@ -106,6 +113,80 @@ export default function ChatPage() {
     },
     [],
   );
+
+  const playMessage = useCallback(async (text: string) => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+    setIsPlaying(true);
+    setWaveformActive(true);
+    try {
+      const res = await fetch("/api/voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (res.status === 403) {
+        setVoiceEnabled(false);
+        setIsPlaying(false);
+        setWaveformActive(false);
+        return;
+      }
+      if (!res.ok) {
+        setIsPlaying(false);
+        setWaveformActive(false);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      audioUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.addEventListener("ended", () => {
+        setIsPlaying(false);
+        setWaveformActive(false);
+        URL.revokeObjectURL(url);
+        audioUrlRef.current = null;
+        audioRef.current = null;
+      });
+      audio.addEventListener("error", () => {
+        setIsPlaying(false);
+        setWaveformActive(false);
+        URL.revokeObjectURL(url);
+        audioUrlRef.current = null;
+        audioRef.current = null;
+      });
+      await audio.play();
+    } catch {
+      setIsPlaying(false);
+      setWaveformActive(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!voiceEnabled || isStreaming || messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.role !== "assistant") return;
+    void playMessage(last.content);
+  }, [messages, isStreaming, voiceEnabled, playMessage]);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -271,21 +352,69 @@ export default function ChatPage() {
       }}
     >
       <header
-        className="flex items-baseline justify-between gap-4"
+        className="flex items-center justify-between gap-4"
         style={{
           padding: "20px 24px",
           borderBottom: "1px solid rgba(242,237,232,0.06)",
         }}
       >
-        <h1
-          className="font-serif italic text-text-primary"
-          style={{ fontSize: 20 }}
-        >
-          Reid
-        </h1>
-        <span className="font-sans" style={{ fontSize: 12, color: "#7A90A8" }}>
-          {subtitle}
-        </span>
+        <div className="flex items-baseline gap-4">
+          <h1
+            className="font-serif italic text-text-primary"
+            style={{ fontSize: 20 }}
+          >
+            Reid
+          </h1>
+          <span className="font-sans" style={{ fontSize: 12, color: "#7A90A8" }}>
+            {subtitle}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          {waveformActive && (
+            <div className="flex items-center gap-[2px] h-4">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  className="w-[2px] rounded-full"
+                  style={{
+                    height: "100%",
+                    backgroundColor: "#B91C1C",
+                    animation: `waveform 0.8s ease-in-out infinite`,
+                    animationDelay: `${i * 0.1}s`,
+                    transformOrigin: "bottom",
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            aria-label={voiceEnabled ? "Disable voice" : "Enable voice"}
+            onClick={() => {
+              if (!isPro) {
+                window.dispatchEvent(new CustomEvent("reid:open-paywall"));
+                return;
+              }
+              setVoiceEnabled((v) => !v);
+            }}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "4px",
+              display: "flex",
+              alignItems: "center",
+              color: voiceEnabled ? "#B91C1C" : "#7A90A8",
+              backgroundColor: voiceEnabled
+                ? "rgba(185,28,28,0.1)"
+                : "transparent",
+              borderRadius: "6px",
+              transition: "color 150ms ease, background-color 150ms ease",
+            }}
+          >
+            <Volume2 size={16} />
+          </button>
+        </div>
       </header>
       {bootstrapError ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
