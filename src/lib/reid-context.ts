@@ -5,7 +5,13 @@
 // SupabaseClient so RLS evaluates against the signed-in user.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Goal, GoalEvent, Session, User } from "@/types/db";
+import type {
+  Goal,
+  GoalEvent,
+  Observation,
+  Session,
+  User,
+} from "@/types/db";
 
 type ContextUser = Pick<
   User,
@@ -89,6 +95,15 @@ export async function getReidContext(
     .limit(5);
   const recentSessions = (sessionRows ?? []) as Session[];
 
+  const { data: observationRows } = await db
+    .from("observations")
+    .select("id, user_id, session_id, text, confidence, created_at")
+    .eq("user_id", userId)
+    .in("confidence", ["medium", "high"])
+    .order("created_at", { ascending: false })
+    .limit(8);
+  const observations = (observationRows ?? []) as Observation[];
+
   const { data: eventRows } = await db
     .from("goal_events")
     .select("id, goal_id, user_id, session_id, delta, note, created_at, goals(title)")
@@ -160,6 +175,28 @@ export async function getReidContext(
     lines.push("");
   }
 
+  // PRIOR TASK — the most recent task_set from a closed session. Reid is
+  // expected to open this session by asking about it unless the founder
+  // leads with progress on it themselves.
+  const priorTaskSession = recentSessions.find(
+    (s) => s.task_set && s.task_set.trim().length > 0,
+  );
+  if (priorTaskSession?.task_set) {
+    const when = formatDate(priorTaskSession.started_at);
+    lines.push("PRIOR TASK");
+    lines.push(`- task: ${priorTaskSession.task_set}`);
+    if (when) lines.push(`- set on: ${when}`);
+    lines.push("");
+  }
+
+  if (observations.length > 0) {
+    lines.push("WHAT YOU'VE NOTICED");
+    for (const o of observations) {
+      lines.push(`- (${o.confidence}) ${o.text}`);
+    }
+    lines.push("");
+  }
+
   if (recentSessions.length > 0) {
     lines.push("RECENT SESSIONS");
     for (const s of recentSessions) {
@@ -171,7 +208,7 @@ export async function getReidContext(
   }
 
   lines.push(
-    "Use this context. Reference goals by their exact title when emitting [GOAL_UPDATE]. Notice when they come back having done — or not done — the task you set. Don't recap the context at them; let it inform your questions.",
+    "Use this context. Reference goals by their exact title when emitting [GOAL_UPDATE]. If PRIOR TASK is present, your first question this session should be about it — unless the founder leads with progress on it themselves. Lean on WHAT YOU'VE NOTICED to push them where they avoid pushing themselves. Don't recap the context at them; let it inform your questions.",
   );
   lines.push("=== END CONTEXT ===");
 

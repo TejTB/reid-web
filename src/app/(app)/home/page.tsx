@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
 import PushOptInBanner from "@/components/PushOptInBanner";
+import ObservationsCard from "@/components/ObservationsCard";
 import { useAuth } from "@/components/AuthProvider";
 import type { User } from "@/types/db";
 
@@ -293,6 +294,10 @@ export default function HomePage() {
               <ArrowRight size={16} strokeWidth={2} />
             </Link>
           </GlassCard>
+
+          {/* Self-hides when there are no observations yet, so brand-new
+              founders don't see dead surface area. */}
+          {user && <ObservationsCard userId={user.id} />}
         </div>
       </div>
 

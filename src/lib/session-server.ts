@@ -5,7 +5,12 @@
 // RLS evaluates against the signed-in user. No service-role bypass.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Message, Session } from "@/types/db";
+import type {
+  Message,
+  Observation,
+  ObservationConfidence,
+  Session,
+} from "@/types/db";
 
 /** Shape of a single goal item captured during onboarding. The Reid model
  *  emits these as JSON in the onboarding-complete sentinel; we accept them
@@ -289,5 +294,41 @@ export async function createGoalsFromOnboarding(
   });
 
   const { error } = await db.from("goals").insert(rows);
+  return !error;
+}
+
+// ----- observations --------------------------------------------------------
+
+/** Returns the user's observations, newest first, capped at `limit`. */
+export async function getMyObservations(
+  db: SupabaseClient,
+  limit: number = 50,
+): Promise<Observation[]> {
+  const { data, error } = await db
+    .from("observations")
+    .select("id, user_id, session_id, text, confidence, created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error || !data) return [];
+  return data as Observation[];
+}
+
+/** Inserts a single observation. user_id is supplied so the call site can
+ *  read it back without a follow-up SELECT — RLS will reject a mismatched
+ *  user_id, so we still rely on the auth cookie for safety. */
+export async function insertObservation(
+  db: SupabaseClient,
+  userId: string,
+  sessionId: string | null,
+  text: string,
+  confidence: ObservationConfidence,
+): Promise<boolean> {
+  if (!userId || !text.trim()) return false;
+  const { error } = await db.from("observations").insert({
+    user_id: userId,
+    session_id: sessionId,
+    text: text.trim(),
+    confidence,
+  });
   return !error;
 }

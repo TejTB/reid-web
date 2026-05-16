@@ -98,3 +98,14 @@ export interface Notification {
   payload: unknown;
   sent_at: string;
 }
+
+export type ObservationConfidence = "low" | "medium" | "high";
+
+export interface Observation {
+  id: string;
+  user_id: string;
+  session_id: string | null;
+  text: string;
+  confidence: ObservationConfidence;
+  created_at: string;
+}

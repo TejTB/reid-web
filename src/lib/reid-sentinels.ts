@@ -18,10 +18,12 @@
 // does it separately because only the route has the message history.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { ObservationConfidence } from "@/types/db";
 import {
   applyGoalDelta,
   createGoalsFromOnboarding,
   endSession,
+  insertObservation,
   type OnboardingGoalInput,
 } from "./session-server";
 
@@ -44,6 +46,11 @@ export interface OnboardingCompleteSentinel {
   goals: OnboardingGoalInput[];
 }
 
+export interface ObservationSentinel {
+  text: string;
+  confidence: ObservationConfidence;
+}
+
 export interface ParsedSentinels {
   /** The raw response with every sentinel removed (the chat-visible text). */
   cleanText: string;
@@ -51,6 +58,7 @@ export interface ParsedSentinels {
   sessionComplete: SessionCompleteSentinel | null;
   onboardingComplete: OnboardingCompleteSentinel | null;
   emailCaptured: string | null;
+  observations: ObservationSentinel[];
 }
 
 // ----- prefixes used by the streaming stripper ----------------------------
@@ -64,6 +72,7 @@ export const SENTINEL_PREFIXES = [
   "[SESSION_COMPLETE]",
   "[ONBOARDING_COMPLETE]",
   "[EMAIL_CAPTURED]",
+  "[OBSERVATION]",
 ] as const;
 
 /** Length of the longest possible sentinel prefix. Used to size the
@@ -92,10 +101,16 @@ const ONBOARDING_COMPLETE_RE =
 // [EMAIL_CAPTURED] email="..."
 const EMAIL_CAPTURED_RE = /\[EMAIL_CAPTURED\]\s*email="([^"]+)"/;
 
+// [OBSERVATION] text="..." confidence=high|medium|low -- zero or one per
+// session, may repeat in malformed sessions; we capture every well-formed
+// match and dedupe by trimmed text.
+const OBSERVATION_RE =
+  /\[OBSERVATION\]\s*text="([^"]+)"\s+confidence=(high|medium|low)\b/g;
+
 // Belt-and-braces: any bracketed sentinel name we didn't formally match.
 // Strips the rest of the line so a malformed tag doesn't leak.
 const STRAY_SENTINEL_RE =
-  /\[(GOAL_UPDATE|SESSION_COMPLETE|ONBOARDING_COMPLETE|EMAIL_CAPTURED)\][^\n]*/g;
+  /\[(GOAL_UPDATE|SESSION_COMPLETE|ONBOARDING_COMPLETE|EMAIL_CAPTURED|OBSERVATION)\][^\n]*/g;
 
 // ----- parseSentinels ------------------------------------------------------
 
@@ -106,6 +121,7 @@ export function parseSentinels(raw: string): ParsedSentinels {
     sessionComplete: null,
     onboardingComplete: null,
     emailCaptured: null,
+    observations: [],
   };
 
   if (typeof raw !== "string" || raw.trim().length === 0) {
@@ -193,6 +209,19 @@ export function parseSentinels(raw: string): ParsedSentinels {
     working = working.replace(EMAIL_CAPTURED_RE, "");
   }
 
+  // ----- OBSERVATION (zero or more, deduped by trimmed text)
+  OBSERVATION_RE.lastIndex = 0;
+  let obsMatch: RegExpExecArray | null;
+  const seenObs = new Set<string>();
+  while ((obsMatch = OBSERVATION_RE.exec(working)) !== null) {
+    const text = obsMatch[1].trim();
+    const confidence = obsMatch[2] as ObservationConfidence;
+    if (!text || seenObs.has(text.toLowerCase())) continue;
+    seenObs.add(text.toLowerCase());
+    result.observations.push({ text, confidence });
+  }
+  working = working.replace(OBSERVATION_RE, "");
+
   // ----- GOAL_UPDATE (zero or more)
   GOAL_UPDATE_RE.lastIndex = 0;
   let guMatch: RegExpExecArray | null;
@@ -223,6 +252,72 @@ export function parseSentinels(raw: string): ParsedSentinels {
   return result;
 }
 
+// ----- fuzzy goal title matching ------------------------------------------
+
+const STOPWORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "of",
+  "to",
+  "in",
+  "on",
+  "for",
+  "and",
+  "or",
+  "my",
+  "our",
+]);
+
+/** Lowercases, strips punctuation, splits on whitespace, drops stopwords.
+ *  Tokens shorter than 2 chars are dropped — they don't usefully discriminate. */
+function tokenize(s: string): Set<string> {
+  const tokens = s
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+  return new Set(tokens);
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const t of a) if (b.has(t)) intersection += 1;
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/** Picks the best fuzzy match for the given title among `goals`, or null if
+ *  no candidate meets the 0.6 Jaccard threshold. Ties are broken by shorter
+ *  title (the simpler match is preferred). */
+function fuzzyMatchGoalId(
+  emittedTitle: string,
+  goals: Array<{ id: string; title: string }>,
+): string | null {
+  if (!emittedTitle || goals.length === 0) return null;
+  const emittedTokens = tokenize(emittedTitle);
+  if (emittedTokens.size === 0) return null;
+
+  let bestId: string | null = null;
+  let bestScore = 0;
+  let bestTitleLen = Infinity;
+  const THRESHOLD = 0.6;
+  for (const g of goals) {
+    const score = jaccard(emittedTokens, tokenize(g.title));
+    if (score < THRESHOLD) continue;
+    if (
+      score > bestScore ||
+      (score === bestScore && g.title.length < bestTitleLen)
+    ) {
+      bestScore = score;
+      bestId = g.id;
+      bestTitleLen = g.title.length;
+    }
+  }
+  return bestId;
+}
+
 // ----- processSentinels ----------------------------------------------------
 
 /** Writes everything in `parsed` to Supabase. Best-effort: per-item failures
@@ -245,12 +340,20 @@ export async function processSentinels(
       .from("goals")
       .select("id, title")
       .eq("user_id", userId);
+    const goals = (goalRows ?? []) as Array<{ id: string; title: string }>;
     const titleIndex = new Map<string, string>();
-    for (const g of (goalRows ?? []) as Array<{ id: string; title: string }>) {
+    for (const g of goals) {
       titleIndex.set(g.title.trim().toLowerCase(), g.id);
     }
     for (const update of parsed.goalUpdates) {
-      const goalId = titleIndex.get(update.goalTitle.trim().toLowerCase());
+      const lower = update.goalTitle.trim().toLowerCase();
+      // Exact match first (cheap and authoritative). Falls back to fuzzy
+      // token-overlap matching for cases where Reid emits a slightly
+      // different title than the one in the DB ("Revenue this month" vs
+      // "Monthly revenue"). Threshold 0.6 Jaccard on alphanumeric word
+      // tokens; below threshold the update is dropped to avoid mislabelling.
+      const goalId =
+        titleIndex.get(lower) ?? fuzzyMatchGoalId(update.goalTitle, goals);
       if (!goalId) continue;
       try {
         await applyGoalDelta(
@@ -315,6 +418,22 @@ export async function processSentinels(
         .eq("id", userId);
     } catch {
       // ignore
+    }
+  }
+
+  // --- Observations ---
+  for (const obs of parsed.observations) {
+    try {
+      await insertObservation(
+        db,
+        userId,
+        sessionId,
+        obs.text,
+        obs.confidence,
+      );
+    } catch {
+      // ignore — per-observation failures stay silent so one bad insert
+      // doesn't poison the rest of the wrap-up.
     }
   }
 }
