@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Home, MessageCircle, Map, ListTodo, Settings } from "lucide-react";
+import { Home, MessageCircle, Map, ListTodo, Settings, Target } from "lucide-react";
 import LogoMark from "./LogoMark";
 import NavItem from "./NavItem";
 import SettingsModal from "./SettingsModal";
@@ -9,6 +9,7 @@ import { getUserId, getUser } from "@/lib/session";
 
 const NAV = [
   { href: "/home", label: "Home", icon: Home },
+  { href: "/goals", label: "Goals", icon: Target },
   { href: "/chat", label: "Reid", icon: MessageCircle },
   { href: "/plan", label: "Plan", icon: Map },
   { href: "/tasks", label: "Tasks", icon: ListTodo },

@@ -261,3 +261,18 @@ body {
   100% { transform: scale(1.4); opacity: 0; }
 }
 .node-pulse { animation: node-pulse 2s ease-out infinite; }
+
+/* /goals — brief flash on a card when its source row is mutated via
+   Realtime. Drives attention without yanking layout. */
+@keyframes goal-flash {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+.animate-goal-flash { animation: goal-flash 500ms ease-in-out; }
+
+/* /goals — completion ceremony overlay entrance. Scale + fade in, 300ms. */
+@keyframes goal-complete-enter {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.animate-goal-complete-enter { animation: goal-complete-enter 300ms ease-out both; }

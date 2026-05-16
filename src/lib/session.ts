@@ -168,27 +168,39 @@ export async function getGoals(userId: string): Promise<Goal[]> {
   return data as Goal[];
 }
 
+/** A goal event flattened with the joined goal's title + unit metadata,
+ *  so the feed UI can render "+£500 New revenue" without a second round-trip. */
+export type GoalEventWithGoal = GoalEvent & {
+  goal_title: string;
+  goal_unit: string;
+  goal_unit_prefix: boolean;
+};
+
 /** Returns the most recent goal events for a user with the parent goal's
- *  title pre-joined, so callers don't need a second round-trip. Each row is
- *  flattened to a `GoalEvent & { goal_title: string }`. */
+ *  title + unit + unit_prefix pre-joined. Each row is flattened to a
+ *  `GoalEventWithGoal`. */
 export async function getGoalEvents(
   userId: string,
   limit: number = 20,
-): Promise<(GoalEvent & { goal_title: string })[]> {
+): Promise<GoalEventWithGoal[]> {
   if (!userId) return [];
   const { data, error } = await supabase
     .from("goal_events")
     .select(
-      "id, goal_id, user_id, session_id, delta, note, created_at, goals(title)",
+      "id, goal_id, user_id, session_id, delta, note, created_at, goals(title, unit, unit_prefix)",
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error || !data) return [];
   return data.map((e) => {
-    // supabase-js types embedded relations as an array even when it's a
-    // single row; cast through the actual shape we know we get back.
-    const joined = e.goals as unknown as { title: string } | null;
+    // supabase-js types embedded relations as an array OR object depending on
+    // inferred FK cardinality. Normalise both shapes through the same cast.
+    const joinedRaw = e.goals as unknown as
+      | { title: string; unit: string; unit_prefix: boolean }
+      | { title: string; unit: string; unit_prefix: boolean }[]
+      | null;
+    const joined = Array.isArray(joinedRaw) ? joinedRaw[0] ?? null : joinedRaw;
     return {
       id: e.id as string,
       goal_id: e.goal_id as string,
@@ -198,6 +210,8 @@ export async function getGoalEvents(
       note: (e.note as string | null) ?? null,
       created_at: e.created_at as string,
       goal_title: joined?.title ?? "",
+      goal_unit: joined?.unit ?? "",
+      goal_unit_prefix: joined?.unit_prefix ?? true,
     };
   });
 }

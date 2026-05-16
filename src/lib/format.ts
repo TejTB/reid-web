@@ -1,3 +1,5 @@
+import type { Goal } from "@/types/db";
+
 // Relative time formatter used by /tasks "Assigned …",
 // and /plan node date stamps. All callers want short, human phrasing — not
 // strict Intl.RelativeTimeFormat semantics — so this is intentionally bespoke.
@@ -97,4 +99,33 @@ export function formatSessionDate(
   if (isSameCalendarDay(then, now)) return "Today";
   if (isYesterday(then, now)) return "Yesterday";
   return `${MONTHS_SHORT[then.getMonth()]} ${then.getDate()}`;
+}
+
+const EN_GB_NUMBER = new Intl.NumberFormat("en-GB");
+
+/** Render a goal-valued number with the goal's unit attached on the correct
+ *  side. unit_prefix = true → "£500"; false → "5 clients". Numbers are
+ *  formatted via Intl.NumberFormat('en-GB') so thousands get separators and
+ *  fractional zeros are dropped. */
+export function formatGoalValue(
+  goal: Pick<Goal, "unit" | "unit_prefix">,
+  value: number,
+): string {
+  const safe = Number.isFinite(value) ? value : 0;
+  const formatted = EN_GB_NUMBER.format(safe);
+  if (goal.unit_prefix) return `${goal.unit}${formatted}`;
+  const unit = goal.unit ? ` ${goal.unit}` : "";
+  return `${formatted}${unit}`;
+}
+
+/** Goal-event feed timestamp. Today → "2:34pm"; older → "May 16, 4:32pm". */
+export function formatEventTime(
+  iso: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!iso) return "";
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "";
+  if (isSameCalendarDay(then, now)) return formatTime12h(then);
+  return `${MONTHS_SHORT[then.getMonth()]} ${then.getDate()}, ${formatTime12h(then)}`;
 }
