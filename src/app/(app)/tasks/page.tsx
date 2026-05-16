@@ -4,38 +4,48 @@ import { useRouter } from "next/navigation";
 import { Check, CheckCircle } from "lucide-react";
 import { getUserId } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
-import { relativeTime } from "@/lib/format";
-import type { Conversation, User } from "@/types/db";
+import type { User } from "@/types/db";
+
+const MONTHS_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+// "Assigned May 16" — short, absolute, no clock time. Future tasks will get
+// their own per-session dates; for now everything traces to the onboarding row.
+function formatAssignedDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}`;
+}
 
 type Task = {
-  id: string;
+  /** Stable per-user index — 0 is the onboarding task. Future appended tasks
+   *  would use 1, 2, … (foundation for sessions.task_set). */
+  index: number;
   text: string;
-  createdAt: string;
+  /** Human source label rendered below the task body. */
+  source: string;
+  /** "Assigned May 16" date stamp. */
+  assignedDate: string;
 };
-
-// Pull every "Your task for tomorrow: …" snippet out of an assistant message.
-// Tasks may appear mid-message (rare today, but defensive). Capture from the
-// label to the next blank line OR the end of the message.
-function extractTasksFromMessage(content: string): string[] {
-  const out: string[] = [];
-  const re = /your\s+task\s+for\s+tomorrow:\s*/gi;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(content)) !== null) {
-    const start = match.index + match[0].length;
-    const rest = content.slice(start);
-    // Stop at a blank line (paragraph break) or end of string.
-    const blank = rest.search(/\n\s*\n/);
-    const slice = blank === -1 ? rest : rest.slice(0, blank);
-    const cleaned = slice.trim();
-    if (cleaned) out.push(cleaned);
-  }
-  return out;
-}
 
 export default function TasksPage() {
   const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [doneMap, setDoneMap] = useState<Record<string, boolean>>({});
+  const [doneMap, setDoneMap] = useState<Record<number, boolean>>({});
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -47,84 +57,44 @@ export default function TasksPage() {
         return;
       }
 
-      // Pull the user (for onboarding_task seed) and all assistant messages
-      // (to scan for labels) in parallel.
-      const [userRes, convRes] = await Promise.all([
-        supabase
-          .from("users")
-          .select(
-            "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, created_at",
-          )
-          .eq("id", id)
-          .maybeSingle(),
-        supabase
-          .from("conversations")
-          .select("id, user_id, role, content, created_at")
-          .eq("user_id", id)
-          .eq("role", "assistant")
-          .order("created_at", { ascending: true }),
-      ]);
+      const { data } = await supabase
+        .from("users")
+        .select(
+          "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, created_at",
+        )
+        .eq("id", id)
+        .maybeSingle();
 
       if (cancelled) return;
 
-      const user = userRes.data as User | null;
-      const rows = (convRes.data ?? []) as Conversation[];
-
+      const user = data as User | null;
       const collected: Task[] = [];
 
-      // Seed from users.onboarding_task. CreatedAt prefers the earliest
-      // assistant message timestamp (closest to when the task was emitted),
-      // falling back to the user's created_at.
       const seedTask = user?.onboarding_task?.trim();
       if (seedTask) {
-        const seedAt =
-          rows[0]?.created_at ?? user?.created_at ?? new Date().toISOString();
         collected.push({
-          id: "onboarding",
+          index: 0,
           text: seedTask,
-          createdAt: seedAt,
+          source: "Session 1",
+          assignedDate: formatAssignedDate(user?.created_at),
         });
       }
 
-      // Scan every assistant message for "Your task for tomorrow:" labels.
-      for (const row of rows) {
-        const extracted = extractTasksFromMessage(row.content);
-        for (let i = 0; i < extracted.length; i++) {
-          collected.push({
-            // Multiple labels in one message? Suffix the index so ids stay
-            // unique (and per-task localStorage flags stay scoped).
-            id: extracted.length === 1 ? row.id : `${row.id}:${i}`,
-            text: extracted[i],
-            createdAt: row.created_at,
-          });
-        }
-      }
-
-      // Dedupe by exact text — when users.onboarding_task agrees with a
-      // labeled assistant message (the common case), keep the earlier one.
-      const seen = new Set<string>();
-      const deduped: Task[] = [];
-      const sorted = [...collected].sort((a, b) =>
-        a.createdAt.localeCompare(b.createdAt),
-      );
-      for (const t of sorted) {
-        const key = t.text.trim();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        deduped.push(t);
-      }
-
-      // Hydrate done flags from localStorage.
-      const map: Record<string, boolean> = {};
+      // Hydrate done flags from localStorage. Keys are
+      // `reid:task:{userId}:{index}:done` — matches /home so toggling on
+      // either screen stays in sync.
+      const map: Record<number, boolean> = {};
       try {
-        for (const t of deduped) {
-          map[t.id] = localStorage.getItem(`reid:task:${t.id}:done`) === "true";
+        for (const t of collected) {
+          map[t.index] =
+            localStorage.getItem(`reid:task:${id}:${t.index}:done`) === "true";
         }
       } catch {
         // localStorage unavailable — assume all undone.
       }
 
-      setTasks(deduped);
+      setUserId(id);
+      setTasks(collected);
       setDoneMap(map);
       setLoaded(true);
     })();
@@ -133,13 +103,14 @@ export default function TasksPage() {
     };
   }, [router]);
 
-  function toggle(taskId: string) {
+  function toggle(taskIndex: number) {
+    if (!userId) return;
     setDoneMap((prev) => {
-      const next = { ...prev, [taskId]: !prev[taskId] };
+      const next = { ...prev, [taskIndex]: !prev[taskIndex] };
       try {
         localStorage.setItem(
-          `reid:task:${taskId}:done`,
-          next[taskId] ? "true" : "false",
+          `reid:task:${userId}:${taskIndex}:done`,
+          next[taskIndex] ? "true" : "false",
         );
       } catch {
         // ignore
@@ -148,8 +119,10 @@ export default function TasksPage() {
     });
   }
 
-  const doneCount = tasks.reduce((n, t) => (doneMap[t.id] ? n + 1 : n), 0);
-  const remaining = tasks.length - doneCount;
+  const doneCount = tasks.reduce(
+    (n, t) => (doneMap[t.index] ? n + 1 : n),
+    0,
+  );
 
   return (
     <div
@@ -174,80 +147,76 @@ export default function TasksPage() {
             color: "#7A90A8",
             fontSize: 15,
             marginTop: 8,
-            marginBottom: 48,
           }}
         >
           What Reid has asked you to do.
         </p>
+        {loaded && tasks.length > 0 && (
+          <p
+            className="font-sans text-right text-text-dim"
+            style={{ fontSize: 12, marginTop: 12 }}
+          >
+            {tasks.length} task{tasks.length === 1 ? "" : "s"} · {doneCount} done
+          </p>
+        )}
       </header>
 
-      {!loaded ? (
-        <div className="flex flex-col gap-3">
-          <div
-            className="rounded-[12px] bg-bg-card animate-skeleton"
-            style={{ height: 72, animationDelay: "0ms" }}
-          />
-          <div
-            className="rounded-[12px] bg-bg-card animate-skeleton"
-            style={{ height: 72, animationDelay: "100ms" }}
-          />
-          <div
-            className="rounded-[12px] bg-bg-card animate-skeleton"
-            style={{ height: 72, animationDelay: "200ms" }}
-          />
-        </div>
-      ) : tasks.length === 0 ? (
-        <div
-          className="flex flex-col items-center text-center animate-fade-up"
-          style={{ paddingTop: 80 }}
-        >
-          <CheckCircle size={48} color="#3A5070" strokeWidth={1.4} />
-          <h2
-            className="font-serif italic"
-            style={{
-              fontSize: 24,
-              color: "#7A90A8",
-              marginTop: 20,
-              fontWeight: 400,
-            }}
-          >
-            No tasks yet.
-          </h2>
-          <p
-            className="font-sans"
-            style={{
-              fontSize: 14,
-              color: "#3A5070",
-              marginTop: 8,
-              maxWidth: 360,
-              lineHeight: 1.6,
-            }}
-          >
-            Reid will assign tasks at the end of your first conversation.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="flex" style={{ gap: 24, marginBottom: 32 }}>
-            <Stat value={tasks.length} label="Total" color="#7A90A8" italic />
-            <Stat
-              value={doneCount}
-              label="Done"
-              color={doneCount > 0 ? "#22C55E" : "#7A90A8"}
+      <div style={{ marginTop: 32 }}>
+        {!loaded ? (
+          <div className="flex flex-col gap-3">
+            <div
+              className="rounded-[12px] bg-bg-card animate-skeleton"
+              style={{ height: 72, animationDelay: "0ms" }}
             />
-            <Stat
-              value={remaining}
-              label="Remaining"
-              color={remaining > 0 ? "#B91C1C" : "#7A90A8"}
+            <div
+              className="rounded-[12px] bg-bg-card animate-skeleton"
+              style={{ height: 72, animationDelay: "100ms" }}
+            />
+            <div
+              className="rounded-[12px] bg-bg-card animate-skeleton"
+              style={{ height: 72, animationDelay: "200ms" }}
             />
           </div>
-
-          <ul className="flex flex-col" style={{ gap: 12, listStyle: "none" }}>
+        ) : tasks.length === 0 ? (
+          <div
+            className="flex flex-col items-center text-center animate-fade-up"
+            style={{ paddingTop: 80 }}
+          >
+            <CheckCircle size={48} color="#3A5070" strokeWidth={1.4} />
+            <h2
+              className="font-serif italic"
+              style={{
+                fontSize: 24,
+                color: "#7A90A8",
+                marginTop: 20,
+                fontWeight: 400,
+              }}
+            >
+              No tasks yet.
+            </h2>
+            <p
+              className="font-sans"
+              style={{
+                fontSize: 14,
+                color: "#3A5070",
+                marginTop: 8,
+                maxWidth: 360,
+                lineHeight: 1.6,
+              }}
+            >
+              Reid will assign tasks at the end of your first conversation.
+            </p>
+          </div>
+        ) : (
+          <ul
+            className="flex flex-col"
+            style={{ gap: 12, listStyle: "none" }}
+          >
             {tasks.map((t, i) => {
-              const done = !!doneMap[t.id];
+              const done = !!doneMap[t.index];
               return (
                 <li
-                  key={t.id}
+                  key={t.index}
                   className="animate-fade-up"
                   style={{ animationDelay: `${i * 60}ms` }}
                 >
@@ -273,7 +242,7 @@ export default function TasksPage() {
                       aria-label={
                         done ? "Mark task incomplete" : "Mark task complete"
                       }
-                      onClick={() => toggle(t.id)}
+                      onClick={() => toggle(t.index)}
                       className="shrink-0 flex items-center justify-center"
                       style={{
                         width: 22,
@@ -314,7 +283,9 @@ export default function TasksPage() {
                           marginTop: 8,
                         }}
                       >
-                        Assigned {relativeTime(t.createdAt)}
+                        Assigned {t.assignedDate}
+                        {t.assignedDate ? "  ·  " : ""}
+                        {t.source}
                       </p>
                     </div>
                   </div>
@@ -322,42 +293,8 @@ export default function TasksPage() {
               );
             })}
           </ul>
-        </>
-      )}
-    </div>
-  );
-}
-
-function Stat({
-  value,
-  label,
-  color,
-  italic = false,
-}: {
-  value: number;
-  label: string;
-  color: string;
-  italic?: boolean;
-}) {
-  return (
-    <div className="flex flex-col">
-      <span
-        className="font-serif"
-        style={{
-          fontSize: 24,
-          color,
-          fontStyle: italic ? "italic" : "normal",
-          lineHeight: 1.1,
-        }}
-      >
-        {value}
-      </span>
-      <span
-        className="font-sans"
-        style={{ fontSize: 13, color: "#7A90A8", marginTop: 4 }}
-      >
-        {label}
-      </span>
+        )}
+      </div>
     </div>
   );
 }

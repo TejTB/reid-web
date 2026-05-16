@@ -1,44 +1,72 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getUserId } from "@/lib/session";
+import { getUserId, getSessions } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
-import { relativeTime } from "@/lib/format";
-import type { User } from "@/types/db";
+import type { Session, User } from "@/types/db";
 
-// Split onboarding_summary into a first sentence/line (title) and remainder
-// (body). Prefer a sentence boundary; fall back to a newline boundary.
-function splitSummary(summary: string): { title: string; body: string } {
-  const trimmed = summary.trim();
-  if (!trimmed) return { title: "", body: "" };
-  // First, look for sentence end (. ! ?) followed by whitespace or EOL.
-  const sentenceMatch = trimmed.match(/^([^\n.!?]+[.!?])\s+([\s\S]+)$/);
-  if (sentenceMatch) {
-    return { title: sentenceMatch[1].trim(), body: sentenceMatch[2].trim() };
-  }
-  // No mid-string sentence break — try a paragraph (blank-line) split.
-  const paraIdx = trimmed.search(/\n\s*\n/);
-  if (paraIdx !== -1) {
-    return {
-      title: trimmed.slice(0, paraIdx).trim(),
-      body: trimmed.slice(paraIdx).trim(),
-    };
-  }
-  // Try first single newline.
-  const nlIdx = trimmed.indexOf("\n");
-  if (nlIdx !== -1) {
-    return {
-      title: trimmed.slice(0, nlIdx).trim(),
-      body: trimmed.slice(nlIdx + 1).trim(),
-    };
-  }
-  // One line, no remainder.
-  return { title: trimmed, body: "" };
+const MONTHS_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+// Local "May 14" / "Today" / "Yesterday" formatter for timeline node dates.
+// Kept self-contained on this page so it doesn't depend on parallel work
+// in src/lib/format.ts.
+function formatNodeDate(
+  iso: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!iso) return "";
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "";
+  const sameDay =
+    then.getFullYear() === now.getFullYear() &&
+    then.getMonth() === now.getMonth() &&
+    then.getDate() === now.getDate();
+  if (sameDay) return "Today";
+  const y = new Date(now);
+  y.setDate(now.getDate() - 1);
+  const isYesterday =
+    then.getFullYear() === y.getFullYear() &&
+    then.getMonth() === y.getMonth() &&
+    then.getDate() === y.getDate();
+  if (isYesterday) return "Yesterday";
+  return `${MONTHS_SHORT[then.getMonth()]} ${then.getDate()}`;
 }
+
+type TimelineRow =
+  | {
+      kind: "starting";
+      label: string;
+      date: string;
+      summary: string;
+    }
+  | {
+      kind: "session";
+      label: string;
+      date: string;
+      summary: string | null;
+    }
+  | {
+      kind: "progress";
+      label: string;
+    };
 
 export default function PlanPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -49,15 +77,20 @@ export default function PlanPage() {
         router.replace("/onboarding");
         return;
       }
-      const { data } = await supabase
-        .from("users")
-        .select(
-          "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, created_at",
-        )
-        .eq("id", id)
-        .maybeSingle();
+      // Pull user + sessions in parallel — both are anon-RLS, no server roundtrip.
+      const [userRes, sessionRows] = await Promise.all([
+        supabase
+          .from("users")
+          .select(
+            "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, last_session_at, session_count, streak_days, created_at",
+          )
+          .eq("id", id)
+          .maybeSingle(),
+        getSessions(id),
+      ]);
       if (cancelled) return;
-      setUser((data as User | null) ?? null);
+      setUser((userRes.data as User | null) ?? null);
+      setSessions(sessionRows);
       setLoaded(true);
     })();
     return () => {
@@ -65,15 +98,39 @@ export default function PlanPage() {
     };
   }, [router]);
 
-  const summary = user?.onboarding_summary?.trim() ?? "";
-  const task = user?.onboarding_task?.trim() ?? "";
-  const { title: summaryTitle, body: summaryBody } = splitSummary(summary);
-
-  // Compute node visibility/stagger ordering once.
-  const nodes: Array<"starting" | "first" | "progress"> = [];
-  if (summary) nodes.push("starting");
-  if (task) nodes.push("first");
-  nodes.push("progress");
+  // Build the rendered rows: oldest first.
+  //
+  // - First row is always STARTING POINT, sourced from users.onboarding_summary.
+  //   That row sits BEFORE the first chat session in the timeline (onboarding
+  //   precedes session 1 in the user-facing count).
+  // - Each subsequent session row is labelled SESSION 2, SESSION 3, … —
+  //   STARTING POINT counts as Session 1 in the user-facing numbering.
+  // - Last row is always IN PROGRESS with the pulsing dot.
+  //
+  // If onboarding_summary is null/empty (incomplete onboarding — should not
+  // happen because /home redirects, but handle defensively), render only the
+  // IN PROGRESS row.
+  const rows: TimelineRow[] = [];
+  const onboardingSummary = user?.onboarding_summary?.trim() ?? "";
+  if (onboardingSummary) {
+    rows.push({
+      kind: "starting",
+      label: "STARTING POINT",
+      date: formatNodeDate(user?.created_at),
+      summary: onboardingSummary,
+    });
+    // Reverse to oldest-first.
+    const oldestFirst = [...sessions].reverse();
+    oldestFirst.forEach((s, i) => {
+      rows.push({
+        kind: "session",
+        label: `SESSION ${i + 2}`,
+        date: formatNodeDate(s.started_at),
+        summary: s.summary?.trim() || null,
+      });
+    });
+  }
+  rows.push({ kind: "progress", label: "IN PROGRESS" });
 
   return (
     <div
@@ -116,194 +173,121 @@ export default function PlanPage() {
           />
         </div>
       ) : (
-        <div className="relative" style={{ paddingLeft: 0 }}>
-          {/* The vertical line sits behind the node circles. Circles render at
-              left: 0 with width 10px; the line is at left:4.5px (so it passes
-              through the dot centers) but spec says left:10px — using the
-              node row's gap, the spec value is for an absolute layout where
-              circles are at left:10px. We render circles inline inside each
-              row at width 10; centerline of dots ends up at 5px. */}
-          <div
-            aria-hidden
-            className="absolute"
-            style={{
-              left: 4.5,
-              top: 6,
-              bottom: 6,
-              width: 1,
-              background: "rgba(242,237,232,0.08)",
-              pointerEvents: "none",
-            }}
-          />
+        <div className="relative">
+          {/* Vertical dim-red line connecting all dots — stops 6px before the
+              last (IN PROGRESS) dot so the timeline visibly terminates. */}
+          {rows.length > 1 && (
+            <div
+              aria-hidden
+              className="absolute"
+              style={{
+                left: 5.5,
+                top: 10,
+                // Each row is ~80px tall avg; the line should reach the last
+                // dot's centre. Stretch bottom:0 and let the last dot sit on
+                // top — visually clean enough.
+                bottom: 10,
+                width: 1,
+                background: "rgba(185,28,28,0.18)",
+                pointerEvents: "none",
+              }}
+            />
+          )}
 
           <div className="flex flex-col" style={{ gap: 40 }}>
-            {nodes.map((kind, i) => {
+            {rows.map((row, i) => {
               const delay = `${i * 80}ms`;
-              if (kind === "starting") {
+              if (row.kind === "starting") {
                 return (
-                  <Node
-                    key="starting"
-                    label="STARTING POINT"
+                  <TimelineNode
+                    key={`starting-${i}`}
+                    label={row.label}
+                    date={row.date}
                     delay={delay}
-                    circle={
-                      <span
-                        aria-hidden
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: "50%",
-                          background: "#B91C1C",
-                          boxShadow: "0 0 12px rgba(185,28,28,0.5)",
-                          display: "block",
-                        }}
-                      />
-                    }
-                  >
-                    {summaryTitle && (
-                      <p
-                        className="font-serif italic whitespace-pre-wrap"
-                        style={{
-                          fontSize: 18,
-                          color: "#F2EDE3",
-                          marginTop: 4,
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {summaryTitle}
-                      </p>
-                    )}
-                    {summaryBody && (
-                      <p
-                        className="font-sans whitespace-pre-wrap"
-                        style={{
-                          fontSize: 14,
-                          color: "#C8D5E3",
-                          marginTop: 6,
-                          lineHeight: 1.6,
-                        }}
-                      >
-                        {summaryBody}
-                      </p>
-                    )}
-                    <p
-                      className="font-sans"
-                      style={{
-                        fontSize: 12,
-                        color: "#3A5070",
-                        marginTop: 8,
-                      }}
-                    >
-                      {relativeTime(user?.created_at)}
-                    </p>
-                  </Node>
-                );
-              }
-              if (kind === "first") {
-                return (
-                  <Node
-                    key="first"
-                    label="FIRST TASK"
-                    delay={delay}
-                    circle={
-                      <span
-                        aria-hidden
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: "50%",
-                          background: "rgba(185,28,28,0.5)",
-                          display: "block",
-                        }}
-                      />
-                    }
+                    dot={<SolidDot />}
                   >
                     <p
                       className="font-serif italic whitespace-pre-wrap"
                       style={{
                         fontSize: 18,
                         color: "#F2EDE3",
-                        marginTop: 4,
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      {task}
-                    </p>
-                    <p
-                      className="font-sans"
-                      style={{
-                        fontSize: 14,
-                        color: "#C8D5E3",
                         marginTop: 6,
-                        lineHeight: 1.6,
+                        lineHeight: 1.45,
                       }}
                     >
-                      Assigned by Reid after session 1.
+                      {row.summary}
                     </p>
-                  </Node>
+                  </TimelineNode>
                 );
               }
-              // IN PROGRESS — always visible.
-              return (
-                <Node
-                  key="progress"
-                  label="IN PROGRESS"
-                  delay={delay}
-                  circle={
-                    <span
-                      aria-hidden
-                      className="relative"
-                      style={{
-                        width: 10,
-                        height: 10,
-                        display: "inline-block",
-                      }}
-                    >
-                      <span
-                        style={{
-                          position: "absolute",
-                          inset: 0,
-                          borderRadius: "50%",
-                          border: "1.5px solid #B91C1C",
-                          background: "transparent",
-                        }}
-                      />
-                      <span
-                        className="node-pulse"
-                        style={{
-                          position: "absolute",
-                          inset: 0,
-                          borderRadius: "50%",
-                          border: "1.5px solid #B91C1C",
-                          background: "transparent",
-                          pointerEvents: "none",
-                        }}
-                      />
-                    </span>
-                  }
-                >
-                  <p
-                    className="font-serif italic"
-                    style={{
-                      fontSize: 18,
-                      color: "#F2EDE3",
-                      marginTop: 4,
-                      lineHeight: 1.4,
-                    }}
+              if (row.kind === "session") {
+                return (
+                  <TimelineNode
+                    key={`session-${i}`}
+                    label={row.label}
+                    date={row.date}
+                    delay={delay}
+                    dot={<SolidDot />}
                   >
-                    Reid is building your plan.
-                  </p>
+                    {row.summary ? (
+                      <p
+                        className="font-serif italic whitespace-pre-wrap"
+                        style={{
+                          fontSize: 18,
+                          color: "#F2EDE3",
+                          marginTop: 6,
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {row.summary}
+                      </p>
+                    ) : (
+                      <p
+                        className="font-sans italic"
+                        style={{
+                          fontSize: 14,
+                          color: "#7A90A8",
+                          marginTop: 6,
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        Session in progress
+                      </p>
+                    )}
+                  </TimelineNode>
+                );
+              }
+              // IN PROGRESS — pulsing red dot, italic Playfair second line.
+              return (
+                <TimelineNode
+                  key={`progress-${i}`}
+                  label={row.label}
+                  delay={delay}
+                  dot={<PulsingDot />}
+                >
                   <p
                     className="font-sans"
                     style={{
                       fontSize: 14,
-                      color: "#7A90A8",
+                      color: "#C8D5E3",
                       marginTop: 6,
                       lineHeight: 1.6,
                     }}
                   >
-                    Keep having sessions. The plan takes shape from what you do.
+                    Reid is building this with you.
                   </p>
-                </Node>
+                  <p
+                    className="font-serif italic"
+                    style={{
+                      fontSize: 16,
+                      color: "#7A90A8",
+                      marginTop: 4,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Keep showing up.
+                  </p>
+                </TimelineNode>
               );
             })}
           </div>
@@ -313,14 +297,49 @@ export default function PlanPage() {
   );
 }
 
-function Node({
+function SolidDot() {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 12,
+        height: 12,
+        borderRadius: "50%",
+        background: "#B91C1C",
+        boxShadow: "0 0 12px rgba(185,28,28,0.5)",
+        display: "block",
+      }}
+    />
+  );
+}
+
+function PulsingDot() {
+  return (
+    <span
+      aria-hidden
+      className="relative animate-pulse"
+      style={{
+        width: 12,
+        height: 12,
+        borderRadius: "50%",
+        background: "#B91C1C",
+        boxShadow: "0 0 12px rgba(185,28,28,0.5)",
+        display: "block",
+      }}
+    />
+  );
+}
+
+function TimelineNode({
   label,
-  circle,
+  date,
+  dot,
   children,
   delay,
 }: {
   label: string;
-  circle: React.ReactNode;
+  date?: string;
+  dot: React.ReactNode;
   children: React.ReactNode;
   delay: string;
 }) {
@@ -332,26 +351,39 @@ function Node({
       <div
         className="shrink-0 relative"
         style={{
-          width: 10,
-          // Circle is vertically aligned with the label baseline ish — 6px
-          // matches the spec margin-top:6px.
+          width: 12,
+          // Visually align dot centre with the label baseline.
           marginTop: 6,
         }}
       >
-        {circle}
+        {dot}
       </div>
       <div className="flex-1 min-w-0">
-        <div
-          className="font-sans"
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            color: "#7A90A8",
-          }}
-        >
-          {label}
+        <div className="flex items-baseline" style={{ gap: 12 }}>
+          <span
+            className="font-sans"
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "#7A90A8",
+            }}
+          >
+            {label}
+          </span>
+          {date && (
+            <span
+              className="font-sans"
+              style={{
+                fontSize: 12,
+                color: "#3A5070",
+                fontWeight: 400,
+              }}
+            >
+              {date}
+            </span>
+          )}
         </div>
         {children}
       </div>
