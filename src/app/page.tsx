@@ -2,17 +2,16 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import LogoMark from "@/components/LogoMark";
-import { getUserId, isOnboarded } from "@/lib/session";
 
 export default function RootPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Synchronous-only redirect gate. localStorage is the source of truth for
-    // "this device finished onboarding" — we do not wait on Supabase here,
-    // because the network round-trip was the source of the redirect loop.
-    const userId = getUserId();
-    const onboarded = isOnboarded();
+    // Synchronous localStorage-only redirect gate. NO Supabase — the network
+    // round-trip was the source of past redirect loops. localStorage is the
+    // source of truth for "this device finished onboarding".
+    const userId = localStorage.getItem("reid:userId");
+    const onboarded = localStorage.getItem("reid:onboarded") === "true";
     if (onboarded && userId) {
       router.replace("/home");
     } else {

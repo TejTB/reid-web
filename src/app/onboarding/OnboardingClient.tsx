@@ -58,7 +58,14 @@ export default function OnboardingClient() {
     // already written these on the streaming end hook — this is a fallback.
     await markOnboardingComplete(idForRequest, summary, task);
 
-    // (c) Animation only begins after (a) and (b) have both completed.
+    // (c) Belt-and-braces: re-assert both flags as literal localStorage calls
+    // immediately before the animation begins. setOnboardedFlag in (a) does
+    // the same work via a helper; this is the contract spelled out in source
+    // so the redirect gate's source of truth is obvious at the call site.
+    localStorage.setItem("reid:userId", idForRequest);
+    localStorage.setItem("reid:onboarded", "true");
+
+    // (d) Animation only begins after (a)–(c) have all completed.
     setIsCompleting(true);
     setTimeout(() => setShowComplete(true), 700);
   }
