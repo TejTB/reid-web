@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { getAuthedUser } from "@/lib/supabase-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { ElevenLabsClient } from "elevenlabs";
 import { z } from "zod";
@@ -9,11 +9,9 @@ const VOICE_ID = "gXoaQmnIbECYarWwg7B2";
 const Schema = z.object({ text: z.string().min(1).max(2000) });
 
 export async function POST(req: NextRequest) {
-  const db = await createServerSupabase();
-  const {
-    data: { user },
-  } = await db.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authed = await getAuthedUser(req);
+  if (!authed) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = authed.user;
 
   const admin = supabaseAdmin();
   const { data: appUser } = await admin

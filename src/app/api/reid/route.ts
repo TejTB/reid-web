@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { anthropic, REID_MODEL, buildSystemPrompt } from "@/lib/anthropic";
-import { createServerSupabase } from "@/lib/supabase-server";
+import { getAuthedUser } from "@/lib/supabase-auth";
 import { extractName } from "@/lib/reid-summary";
 import { getReidContext } from "@/lib/reid-context";
 import {
@@ -340,13 +340,12 @@ class SentinelStripper {
 // ----- POST handler -------------------------------------------------------
 
 export async function POST(req: NextRequest) {
-  const db = await createServerSupabase();
-  const {
-    data: { user: authUser },
-  } = await db.auth.getUser();
-  if (!authUser) {
+  const authed = await getAuthedUser(req);
+  if (!authed) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
+  const db = authed.supabase;
+  const authUser = authed.user;
 
   let body: unknown;
   try {
