@@ -207,7 +207,7 @@ export default function PlanPage() {
                     dot={<SolidDot />}
                   >
                     <p
-                      className="font-serif italic whitespace-pre-wrap"
+                      className="font-serif italic whitespace-pre-wrap [text-wrap:pretty]"
                       style={{
                         fontSize: 18,
                         color: "#F2EDE3",
@@ -231,7 +231,7 @@ export default function PlanPage() {
                   >
                     {row.summary ? (
                       <p
-                        className="font-serif italic whitespace-pre-wrap"
+                        className="font-serif italic whitespace-pre-wrap [text-wrap:pretty]"
                         style={{
                           fontSize: 18,
                           color: "#F2EDE3",
@@ -266,7 +266,7 @@ export default function PlanPage() {
                   dot={<PulsingDot />}
                 >
                   <p
-                    className="font-sans"
+                    className="font-sans [text-wrap:pretty]"
                     style={{
                       fontSize: 14,
                       color: "#C8D5E3",
@@ -277,7 +277,7 @@ export default function PlanPage() {
                     Reid is building this with you.
                   </p>
                   <p
-                    className="font-serif italic"
+                    className="font-serif italic [text-wrap:pretty]"
                     style={{
                       fontSize: 16,
                       color: "#7A90A8",

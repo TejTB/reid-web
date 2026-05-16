@@ -169,7 +169,7 @@ export default function HomePage() {
         >
           <GlassCard title="YOUR FOCUS">
             {summary ? (
-              <p className="font-serif italic text-text-primary text-[20px] leading-[1.55] whitespace-pre-wrap">
+              <p className="font-serif italic text-text-primary text-[20px] leading-[1.55] whitespace-pre-wrap [text-wrap:pretty]">
                 {summary}
               </p>
             ) : (

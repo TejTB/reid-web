@@ -100,45 +100,40 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        <div
-          className="flex items-center gap-3"
-          style={{
-            padding: "16px 22px",
-            borderTop: "1px solid rgba(242,237,232,0.06)",
-          }}
-        >
+        {/* Identity chip: avatar initial + name. The previous decorative green
+            "online" dot was removed — it had no real wiring (no presence
+            channel, no realtime subscription) so it was misrepresenting
+            state. The name + initial are sourced from public.users.name and
+            fall back to "Friend" only if the user hasn't supplied one yet. */}
+        {name && (
           <div
-            className="rounded-full flex items-center justify-center"
+            className="flex items-center gap-3"
             style={{
-              width: 28,
-              height: 28,
-              background: "rgba(255,255,255,0.08)",
-              fontFamily: "var(--font-sans), sans-serif",
-              fontSize: 12,
-              color: "#C8D5E3",
+              padding: "16px 22px",
+              borderTop: "1px solid rgba(242,237,232,0.06)",
             }}
           >
-            {initial}
+            <div
+              className="rounded-full flex items-center justify-center"
+              style={{
+                width: 28,
+                height: 28,
+                background: "rgba(255,255,255,0.08)",
+                fontFamily: "var(--font-sans), sans-serif",
+                fontSize: 12,
+                color: "#C8D5E3",
+              }}
+            >
+              {initial}
+            </div>
+            <span
+              className="font-sans truncate"
+              style={{ fontSize: 13, color: "#7A90A8" }}
+            >
+              {name}
+            </span>
           </div>
-          <span
-            className="font-sans truncate"
-            style={{ fontSize: 13, color: "#7A90A8" }}
-          >
-            {name ?? "Friend"}
-          </span>
-          <span
-            aria-hidden
-            style={{
-              marginLeft: "auto",
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              background: "#22C55E",
-              boxShadow: "0 0 0 2px rgba(34,197,94,0.2)",
-              flexShrink: 0,
-            }}
-          />
-        </div>
+        )}
       </aside>
 
       <main className="reid-radial flex-1 md:ml-[224px] pb-20 md:pb-0">
@@ -151,10 +146,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </main>
 
       <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t backdrop-blur-xl"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-white/5 backdrop-blur"
         style={{
-          background: "rgba(8,18,34,0.98)",
-          borderTopColor: "rgba(242,237,232,0.06)",
+          background: "rgba(10,22,40,0.95)",
           paddingBottom: "env(safe-area-inset-bottom)",
           minHeight: 64,
         }}

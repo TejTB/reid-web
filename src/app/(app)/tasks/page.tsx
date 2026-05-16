@@ -263,7 +263,7 @@ export default function TasksPage() {
                     </button>
                     <div className="flex-1 min-w-0">
                       <p
-                        className="font-sans whitespace-pre-wrap"
+                        className="font-sans whitespace-pre-wrap [text-wrap:pretty]"
                         style={{
                           fontSize: 15,
                           color: done ? "#7A90A8" : "#F2EDE3",

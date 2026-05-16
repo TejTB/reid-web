@@ -66,7 +66,7 @@ export default function ChatStream({
           return (
             <div key={key} className="animate-fade-up mb-8">
               <p
-                className="font-serif italic whitespace-pre-wrap max-w-[78%]"
+                className="font-serif italic whitespace-pre-wrap max-w-[78%] [text-wrap:pretty]"
                 style={{ fontSize: 20, lineHeight: 1.75, color: "#F2EDE3" }}
               >
                 {m.content}
@@ -78,7 +78,7 @@ export default function ChatStream({
           <div key={key} className="animate-fade-right mb-8 flex justify-end">
             <div className="user-bubble max-w-[62%]">
               <p
-                className="font-sans whitespace-pre-wrap"
+                className="font-sans whitespace-pre-wrap [text-wrap:pretty]"
                 style={{ fontSize: 15, lineHeight: 1.6, color: "#C8D5E3" }}
               >
                 {m.content}
@@ -91,7 +91,7 @@ export default function ChatStream({
       {isStreaming && streamingText && (
         <div className="animate-fade-up mb-8">
           <p
-            className="font-serif italic whitespace-pre-wrap max-w-[78%]"
+            className="font-serif italic whitespace-pre-wrap max-w-[78%] [text-wrap:pretty]"
             style={{ fontSize: 20, lineHeight: 1.75, color: "#F2EDE3" }}
           >
             {streamingText}
