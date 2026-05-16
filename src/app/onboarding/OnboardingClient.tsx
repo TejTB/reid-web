@@ -12,6 +12,7 @@ import {
   setUserName,
   markOnboardingComplete,
   setOnboardedFlag,
+  getUser,
 } from "@/lib/session";
 import { parseOnboardingClose, summaryForHome } from "@/lib/reid-summary";
 import type { Message } from "@/types/chat";
@@ -121,6 +122,13 @@ export default function OnboardingClient() {
       }
     }
 
+    // The server strips sentinels from the stream before they reach us, so
+    // parseOnboardingClose(acc) will report hasSentinel=false on fresh
+    // Sprint 5+ traffic. We keep it as a defensive fallback for any path
+    // that bypasses the server filter, but the canonical signal is now the
+    // user's onboarding_complete flag — the server flips it the moment it
+    // sees [ONBOARDING_COMPLETE] in the model output, before this stream
+    // closes.
     const close = parseOnboardingClose(acc);
     const cleaned = close.hasSentinel ? close.body : acc;
 
@@ -131,6 +139,19 @@ export default function OnboardingClient() {
     if (close.hasSentinel) {
       void triggerCompletion(idForRequest, acc);
       return;
+    }
+
+    // Server-side signal: the route writes onboarding_complete=true as soon
+    // as the closing sentinel is observed in the model output. Check the
+    // user row after the stream closes — if it flipped, we're done.
+    try {
+      const u = await getUser(idForRequest);
+      if (u?.onboarding_complete === true) {
+        void triggerCompletion(idForRequest, acc);
+        return;
+      }
+    } catch {
+      // best-effort — fall through to the turn-count fallback
     }
 
     const userTurnsAfter = seed.filter((m) => m.role === "user").length;
