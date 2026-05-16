@@ -9,91 +9,89 @@ export default function ChatStream({
   messages,
   streamingText,
   isStreaming,
+  faded = false,
 }: {
   messages: ChatMessage[];
   streamingText: string;
   isStreaming: boolean;
+  faded?: boolean;
 }) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const firstScroll = useRef(true);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll the end-marker into view on every messages update. We do NOT
+  // depend on streamingText/isStreaming here — that's intentional, per the
+  // Sprint 3 hotfix spec. Per-token scroll during streaming caused jitter and
+  // is no longer wanted.
   useEffect(() => {
-    // First render after history loads should be an instant jump (no animation
-    // from top down through the whole transcript). Subsequent updates — new
-    // user messages, streaming deltas, end-of-stream — animate smoothly.
-    const behavior: ScrollBehavior = firstScroll.current ? "instant" : "smooth";
-    firstScroll.current = false;
-    bottomRef.current?.scrollIntoView({ behavior, block: "end" });
-  }, [messages, streamingText, isStreaming]);
+    endRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
+  }, [messages]);
 
   return (
     <div
-      // Bottom padding clears the fixed ChatInput bar. On mobile the input also
-      // sits above the 64px bottom nav, so we need more clearance (~160px).
-      className="flex-1 overflow-y-auto pt-6 pb-[160px] md:pb-[140px]"
-      style={{ scrollBehavior: "smooth" }}
+      ref={messagesContainerRef}
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        paddingTop: "80px",
+        paddingBottom: "160px",
+        paddingLeft: "24px",
+        paddingRight: "24px",
+        scrollBehavior: "smooth",
+        transition: "opacity 500ms ease 200ms",
+        opacity: faded ? 0 : 1,
+      }}
     >
-      <div className="flex flex-col">
-        {messages.map((m, i) => {
-          const key = m.id ?? `${m.role}-${i}`;
-          if (m.role === "assistant") {
-            return (
-              <div key={key} className="animate-fade-up mb-8">
-                <p
-                  className="font-serif italic whitespace-pre-wrap max-w-[78%]"
-                  style={{
-                    fontSize: 20,
-                    lineHeight: 1.75,
-                    color: "#F2EDE3",
-                  }}
-                >
-                  {m.content}
-                </p>
-              </div>
-            );
-          }
+      {messages.map((m, i) => {
+        const key = m.id ?? `${m.role}-${i}`;
+        if (m.role === "assistant") {
           return (
-            <div key={key} className="animate-fade-right mb-8 flex justify-end">
-              <div className="user-bubble max-w-[62%]">
-                <p
-                  className="font-sans whitespace-pre-wrap"
-                  style={{
-                    fontSize: 15,
-                    lineHeight: 1.6,
-                    color: "#C8D5E3",
-                  }}
-                >
-                  {m.content}
-                </p>
-              </div>
+            <div key={key} className="animate-fade-up mb-8">
+              <p
+                className="font-serif italic whitespace-pre-wrap max-w-[78%]"
+                style={{ fontSize: 20, lineHeight: 1.75, color: "#F2EDE3" }}
+              >
+                {m.content}
+              </p>
             </div>
           );
-        })}
-
-        {isStreaming && streamingText && (
-          <div className="animate-fade-up mb-8">
-            <p
-              className="font-serif italic whitespace-pre-wrap max-w-[78%]"
-              style={{
-                fontSize: 20,
-                lineHeight: 1.75,
-                color: "#F2EDE3",
-              }}
-            >
-              {streamingText}
-              <span className="inline-block w-[2px] h-[18px] align-[-3px] ml-0.5 bg-text-secondary animate-caret" />
-            </p>
+        }
+        return (
+          <div key={key} className="animate-fade-right mb-8 flex justify-end">
+            <div className="user-bubble max-w-[62%]">
+              <p
+                className="font-sans whitespace-pre-wrap"
+                style={{ fontSize: 15, lineHeight: 1.6, color: "#C8D5E3" }}
+              >
+                {m.content}
+              </p>
+            </div>
           </div>
-        )}
+        );
+      })}
 
-        {isStreaming && !streamingText && (
-          <div className="mb-8">
-            <TypingDots />
-          </div>
-        )}
+      {isStreaming && streamingText && (
+        <div className="animate-fade-up mb-8">
+          <p
+            className="font-serif italic whitespace-pre-wrap max-w-[78%]"
+            style={{ fontSize: 20, lineHeight: 1.75, color: "#F2EDE3" }}
+          >
+            {streamingText}
+            <span className="inline-block w-[2px] h-[18px] align-[-3px] ml-0.5 bg-text-secondary animate-caret" />
+          </p>
+        </div>
+      )}
 
-        <div ref={bottomRef} />
-      </div>
+      {isStreaming && !streamingText && (
+        <div className="mb-8">
+          <TypingDots />
+        </div>
+      )}
+
+      <div ref={endRef} style={{ height: "1px" }} />
     </div>
   );
 }

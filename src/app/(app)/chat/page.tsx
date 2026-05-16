@@ -153,10 +153,22 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[720px] h-[calc(100dvh-64px)] md:h-[100dvh] overflow-hidden flex flex-col px-6">
+    <div
+      style={{
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: "#0A1628",
+        overflow: "hidden",
+        position: "relative",
+      }}
+    >
       <header
-        className="pt-[60px] pb-5 flex items-baseline justify-between gap-4"
-        style={{ borderBottom: "1px solid rgba(242,237,232,0.06)" }}
+        className="flex items-baseline justify-between gap-4"
+        style={{
+          padding: "20px 24px",
+          borderBottom: "1px solid rgba(242,237,232,0.06)",
+        }}
       >
         <h1 className="font-serif text-text-primary" style={{ fontSize: 20 }}>
           Reid
@@ -171,15 +183,24 @@ export default function ChatPage() {
         )}
       </header>
       {!loaded ? (
-        <div className="flex-1 flex flex-col gap-5 py-8">
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            paddingTop: "80px",
+            paddingBottom: "160px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
+          }}
+        >
           {/* Message-shaped skeletons: Reid (left, wide) / user (right, pill) /
               Reid (left, narrower). Staggered so the eye reads them as a
               sequence of incoming bubbles. */}
           <div
-            className="h-10 rounded-md bg-bg-card animate-skeleton"
+            className="h-10 rounded-md bg-bg-card animate-skeleton mb-5"
             style={{ width: "78%", animationDelay: "0ms" }}
           />
-          <div className="flex justify-end">
+          <div className="flex justify-end mb-5">
             <div
               className="h-10 rounded-[18px] bg-bg-card animate-skeleton"
               style={{ width: "52%", animationDelay: "100ms" }}
@@ -191,15 +212,13 @@ export default function ChatPage() {
           />
         </div>
       ) : (
-        <>
-          <ChatStream
-            messages={messages}
-            streamingText={streamingText}
-            isStreaming={isStreaming}
-          />
-          <ChatInput onSubmit={handleSend} disabled={isStreaming} />
-        </>
+        <ChatStream
+          messages={messages}
+          streamingText={streamingText}
+          isStreaming={isStreaming}
+        />
       )}
+      <ChatInput onSubmit={handleSend} disabled={isStreaming || !loaded} />
     </div>
   );
 }

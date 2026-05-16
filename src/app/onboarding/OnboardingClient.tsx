@@ -156,7 +156,17 @@ export default function OnboardingClient() {
   }
 
   return (
-    <div className="h-screen overflow-hidden onboarding-bg flex flex-col">
+    <div
+      className="onboarding-bg"
+      style={{
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: "#0A1628",
+        overflow: "hidden",
+        position: "relative",
+      }}
+    >
       <header
         className="flex items-center"
         style={{
@@ -187,35 +197,23 @@ export default function OnboardingClient() {
       >
         <ProgressDots total={10} current={Math.min(userTurnCount, 10)} />
       </div>
-      <div className="mx-auto w-full max-w-[720px] flex-1 flex flex-col px-6">
-        <div
-          style={{
-            transition: "opacity 500ms ease 200ms",
-            opacity: isCompleting ? 0 : 1,
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-          }}
-        >
-          <ChatStream
-            messages={messages}
-            streamingText={streamingText}
-            isStreaming={isStreaming}
-          />
-        </div>
-        <div
-          style={{
-            transition: "opacity 300ms ease",
-            opacity: isCompleting ? 0 : 1,
-            pointerEvents: isCompleting ? "none" : "auto",
-          }}
-        >
-          <ChatInput
-            onSubmit={handleSend}
-            disabled={isStreaming || isCompleting}
-          />
-        </div>
+      <ChatStream
+        messages={messages}
+        streamingText={streamingText}
+        isStreaming={isStreaming}
+        faded={isCompleting}
+      />
+      <div
+        style={{
+          transition: "opacity 300ms ease",
+          opacity: isCompleting ? 0 : 1,
+          pointerEvents: isCompleting ? "none" : "auto",
+        }}
+      >
+        <ChatInput
+          onSubmit={handleSend}
+          disabled={isStreaming || isCompleting}
+        />
       </div>
       {showComplete && <OnboardingComplete />}
     </div>
