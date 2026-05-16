@@ -36,10 +36,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = await supabase.auth.getSession();
     setSession(session);
     if (session) {
-      // Realtime channels need the auth token; set it once we have a session
-      // so RLS-filtered subscriptions (e.g. /goals) receive updates.
       supabase.realtime.setAuth(session.access_token);
-      const { data } = await supabase.from("users").select("*").maybeSingle();
+      let { data } = await supabase.from("users").select("*").maybeSingle();
+      if (!data) {
+        try {
+          await fetch("/api/auth/sync", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+          ({ data } = await supabase.from("users").select("*").maybeSingle());
+        } catch (err) {
+          console.error("[AuthProvider] sync failed:", err);
+        }
+      }
       setMe((data as User | null) ?? null);
     } else {
       setMe(null);

@@ -62,15 +62,18 @@ function streakTextFor(user: LoadedUser, now: Date = new Date()): string | null 
 
 export default function HomePage() {
   const router = useRouter();
-  const { me, loading } = useAuth();
+  const { me, session, loading } = useAuth();
   const [user, setUser] = useState<LoadedUser | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [taskDone, setTaskDone] = useState(false);
 
   useEffect(() => {
     if (loading) return;
-    if (!me) {
+    if (!session) {
       router.replace("/login");
+      return;
+    }
+    if (!me) {
       return;
     }
     if (!me.onboarding_complete) {
@@ -95,7 +98,40 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, me, router]);
+  }, [loading, me, session, router]);
+
+  if (!loading && session && !me) {
+    return (
+      <div className="mx-auto w-full max-w-[480px] px-6 pt-[80px] pb-12 flex flex-col gap-6 text-center">
+        <h1 className="font-serif text-text-primary text-[28px]" style={{ fontWeight: 500, letterSpacing: "-0.02em" }}>
+          Something&apos;s off with your account.
+        </h1>
+        <p className="font-sans text-text-dim text-[15px]" style={{ lineHeight: 1.55 }}>
+          We couldn&apos;t load your profile. Sign out and sign back in.
+        </p>
+        <button
+          type="button"
+          onClick={async () => {
+            const { signOut } = await import("@/lib/session");
+            await signOut();
+            router.replace("/login");
+          }}
+          className="cta-shadow self-center bg-accent hover:bg-accent-hover text-text-primary"
+          style={{
+            height: 46,
+            padding: "0 24px",
+            borderRadius: 9,
+            fontFamily: "var(--font-sans), sans-serif",
+            fontSize: 13,
+            fontWeight: 500,
+            letterSpacing: "0.04em",
+          }}
+        >
+          Sign out
+        </button>
+      </div>
+    );
+  }
 
   if (!loaded) {
     return (
