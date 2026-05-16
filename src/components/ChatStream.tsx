@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { Message } from "@/types/chat";
 import TypingDots from "./TypingDots";
 
@@ -10,29 +10,38 @@ export default function ChatStream({
   streamingText,
   isStreaming,
   faded = false,
+  emptyState,
+  headerSlot,
 }: {
   messages: ChatMessage[];
   streamingText: string;
   isStreaming: boolean;
   faded?: boolean;
+  /** Rendered in place of the messages list when there are no messages and
+   *  nothing is streaming. Used by /chat for the "Your co-founder is ready"
+   *  empty state. */
+  emptyState?: ReactNode;
+  /** Optional content rendered above the messages — used by /chat to render
+   *  session dividers and prior-session history scoped to this stream. */
+  headerSlot?: ReactNode;
 }) {
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll the end-marker into view on every messages update. We do NOT
-  // depend on streamingText/isStreaming here — that's intentional, per the
-  // Sprint 3 hotfix spec. Per-token scroll during streaming caused jitter and
-  // is no longer wanted.
+  // Auto-scroll the bottom marker into view on every messages update AND on
+  // every streamingText delta. Including streamingText keeps the user pinned
+  // to the latest character as Reid types.
   useEffect(() => {
-    endRef.current?.scrollIntoView({
+    bottomRef.current?.scrollIntoView({
       behavior: "smooth",
       block: "end",
     });
-  }, [messages]);
+  }, [messages, streamingText]);
+
+  const hasContent = messages.length > 0 || (isStreaming && streamingText);
+  const showEmpty = !!emptyState && !hasContent && !isStreaming;
 
   return (
     <div
-      ref={messagesContainerRef}
       style={{
         flex: 1,
         overflowY: "auto",
@@ -45,6 +54,12 @@ export default function ChatStream({
         opacity: faded ? 0 : 1,
       }}
     >
+      {showEmpty ? (
+        <div className="h-full flex items-center justify-center">
+          {emptyState}
+        </div>
+      ) : null}
+      {headerSlot}
       {messages.map((m, i) => {
         const key = m.id ?? `${m.role}-${i}`;
         if (m.role === "assistant") {
@@ -80,7 +95,7 @@ export default function ChatStream({
             style={{ fontSize: 20, lineHeight: 1.75, color: "#F2EDE3" }}
           >
             {streamingText}
-            <span className="inline-block w-[2px] h-[18px] align-[-3px] ml-0.5 bg-text-secondary animate-caret" />
+            <span className="inline-block w-[2px] h-[1em] align-middle ml-0.5 bg-accent animate-pulse" />
           </p>
         </div>
       )}
@@ -91,7 +106,7 @@ export default function ChatStream({
         </div>
       )}
 
-      <div ref={endRef} style={{ height: "1px" }} />
+      <div ref={bottomRef} style={{ height: "1px" }} />
     </div>
   );
 }

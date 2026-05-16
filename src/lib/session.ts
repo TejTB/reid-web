@@ -4,6 +4,27 @@ import type { Session, User } from "@/types/db";
 
 const KEY = "reid:userId";
 const ONBOARDED_KEY = "reid:onboarded";
+const CHAT_SESSION_KEY = "reid:chatSessionId";
+
+/** The active /chat sessionId, set the first time the user POSTs to /api/reid
+ *  from the chat page (server returns it via the X-Reid-Session-Id header).
+ *  Kept separate from the onboarding session so /chat never shows the
+ *  onboarding conversation. Cleared by `clearSession`. */
+export function getChatSessionId(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(CHAT_SESSION_KEY);
+}
+
+export function setChatSessionId(sessionId: string): void {
+  if (typeof window === "undefined") return;
+  if (!sessionId) return;
+  localStorage.setItem(CHAT_SESSION_KEY, sessionId);
+}
+
+export function clearChatSessionId(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(CHAT_SESSION_KEY);
+}
 
 export function getUserId(): string | null {
   if (typeof window === "undefined") return null;
@@ -25,6 +46,7 @@ export function clearSession(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(KEY);
   localStorage.removeItem(ONBOARDED_KEY);
+  localStorage.removeItem(CHAT_SESSION_KEY);
   // Also wipe per-task done flags — leftover flags from the previous session
   // would otherwise resurrect (in /tasks or /home) once a new user reaches a
   // task with the same id under a fresh userId.

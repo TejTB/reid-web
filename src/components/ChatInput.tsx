@@ -5,21 +5,26 @@ import { useEffect, useRef, useState } from "react";
 export default function ChatInput({
   onSubmit,
   disabled,
+  autofocus = true,
 }: {
   onSubmit: (content: string) => void;
   disabled?: boolean;
+  /** When false, the input does not steal focus on mount or on disabled→enabled
+   *  transitions. /chat passes false outside the empty state so we don't fight
+   *  the user's scroll position on every render. */
+  autofocus?: boolean;
 }) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canSend = !!value.trim() && !disabled;
 
   useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
+    if (autofocus) textareaRef.current?.focus();
+  }, [autofocus]);
 
   useEffect(() => {
-    if (!disabled) textareaRef.current?.focus();
-  }, [disabled]);
+    if (!disabled && autofocus) textareaRef.current?.focus();
+  }, [disabled, autofocus]);
 
   function autoresize(el: HTMLTextAreaElement) {
     el.style.height = "auto";

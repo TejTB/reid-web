@@ -8,5 +8,6 @@ export interface Message {
 export interface ReidRequest {
   userId: string;
   mode: "onboarding" | "chat";
+  sessionId?: string | null;
   messages: Message[];
 }

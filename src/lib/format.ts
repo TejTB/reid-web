@@ -1,4 +1,4 @@
-// Relative time formatter used by /chat header subtitle, /tasks "Assigned …",
+// Relative time formatter used by /tasks "Assigned …",
 // and /plan node date stamps. All callers want short, human phrasing — not
 // strict Intl.RelativeTimeFormat semantics — so this is intentionally bespoke.
 export function relativeTime(
@@ -22,4 +22,79 @@ export function relativeTime(
   if (weeks < 8) return `${weeks} wk${weeks === 1 ? "" : "s"} ago`;
   const months = Math.round(days / 30);
   return `${months} mo ago`;
+}
+
+const MONTHS_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+function isSameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function isYesterday(then: Date, now: Date): boolean {
+  const y = new Date(now);
+  y.setDate(now.getDate() - 1);
+  return isSameCalendarDay(then, y);
+}
+
+function formatTime12h(d: Date): string {
+  const hours24 = d.getHours();
+  const minutes = d.getMinutes();
+  const period = hours24 >= 12 ? "pm" : "am";
+  let hours = hours24 % 12;
+  if (hours === 0) hours = 12;
+  const mm = minutes.toString().padStart(2, "0");
+  return `${hours}:${mm}${period}`;
+}
+
+/** Subtitle for the chat header's "Last session: …" line.
+ *  - same calendar day  → `Today 2:34pm`
+ *  - previous calendar day → `Yesterday`
+ *  - within 7 days       → `{n} days ago`
+ *  - older               → `MMM d`
+ *  - null/undefined      → `First session.` */
+export function formatLastSession(
+  iso: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!iso) return "First session.";
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "First session.";
+  if (isSameCalendarDay(then, now)) {
+    return `Today ${formatTime12h(then)}`;
+  }
+  if (isYesterday(then, now)) return "Yesterday";
+  const dayMs = 1000 * 60 * 60 * 24;
+  const diffDays = Math.floor((now.getTime() - then.getTime()) / dayMs);
+  if (diffDays >= 2 && diffDays < 7) return `${diffDays} days ago`;
+  return `${MONTHS_SHORT[then.getMonth()]} ${then.getDate()}`;
+}
+
+/** Session-divider date label: "May 9" / "Today" / "Yesterday". */
+export function formatSessionDate(
+  iso: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!iso) return "";
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "";
+  if (isSameCalendarDay(then, now)) return "Today";
+  if (isYesterday(then, now)) return "Yesterday";
+  return `${MONTHS_SHORT[then.getMonth()]} ${then.getDate()}`;
 }

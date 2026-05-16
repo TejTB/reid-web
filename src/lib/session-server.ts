@@ -6,7 +6,7 @@
 // service role key is involved.
 
 import { supabase } from "./supabase";
-import type { Session } from "@/types/db";
+import type { Message, Session } from "@/types/db";
 
 /** Returns the user's sessions, newest first, with the seven columns the
  *  UI cares about. */
@@ -117,6 +117,67 @@ export async function appendMessages(
     content: m.content,
   }));
   await supabase.from("messages").insert(rows);
+}
+
+/** Loads all messages for a single session in ascending order. The user_id
+ *  filter is defensive — even with anon-permissive RLS, we never want a
+ *  client mis-supplying a sessionId to read another user's history. Returns
+ *  empty array on miss/error. */
+export async function getMessagesForSession(
+  userId: string,
+  sessionId: string,
+): Promise<Message[]> {
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id, session_id, user_id, role, content, created_at")
+    .eq("session_id", sessionId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  if (error || !data) return [];
+  return data as Message[];
+}
+
+/** Loads the user's most recent `limit` sessions (newest first) along with
+ *  every message in each, returned in chronological order (oldest session
+ *  first). Used to render multi-session chat history with dividers. */
+export async function getRecentSessionsWithMessages(
+  userId: string,
+  limit: number,
+): Promise<{ session: Session; messages: Message[] }[]> {
+  const { data: sessionRows, error } = await supabase
+    .from("sessions")
+    .select("id, user_id, started_at, ended_at, summary, task_set, message_count")
+    .eq("user_id", userId)
+    .order("started_at", { ascending: false })
+    .limit(limit);
+  if (error || !sessionRows || sessionRows.length === 0) return [];
+
+  const sessions = sessionRows as Session[];
+  const ids = sessions.map((s) => s.id);
+
+  const { data: msgRows } = await supabase
+    .from("messages")
+    .select("id, session_id, user_id, role, content, created_at")
+    .in("session_id", ids)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  const messages = (msgRows ?? []) as Message[];
+
+  const grouped = new Map<string, Message[]>();
+  for (const m of messages) {
+    const arr = grouped.get(m.session_id) ?? [];
+    arr.push(m);
+    grouped.set(m.session_id, arr);
+  }
+
+  // Return chronological (oldest session first) so the UI can render top→bottom.
+  return sessions
+    .slice()
+    .reverse()
+    .map((session) => ({
+      session,
+      messages: grouped.get(session.id) ?? [],
+    }));
 }
 
 /** Returns true iff the session exists AND belongs to the given user.

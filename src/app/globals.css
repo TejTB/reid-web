@@ -110,17 +110,18 @@ body {
 /* Input bar with top sheen. */
 .input-bar {
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1.5px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   position: relative;
-  transition: border-color 200ms ease;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
 }
-/* Subtle red focus state — only when the textarea inside actually receives
-   focus. Default and hover stay neutral grey. */
+/* Focus state — only when the textarea inside actually receives focus.
+   Default and hover stay neutral white/8. The accent ring is gated on
+   :focus-within so we never carry an always-on red border. */
 .input-bar:focus-within {
-  border-color: rgba(185, 28, 28, 0.55);
+  border-color: var(--color-accent);
 }
 .input-bar::before {
   content: "";
