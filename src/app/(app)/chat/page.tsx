@@ -4,13 +4,9 @@ import { useRouter } from "next/navigation";
 import ChatStream from "@/components/ChatStream";
 import ChatInput from "@/components/ChatInput";
 import LogoMark from "@/components/LogoMark";
+import { useAuth } from "@/components/AuthProvider";
 import { streamReid } from "@/lib/reid";
-import {
-  getUserId,
-  getUser,
-  getChatSessionId,
-  setChatSessionId,
-} from "@/lib/session";
+import { getChatSessionId, setChatSessionId } from "@/lib/session";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
 import type { Message } from "@/types/chat";
 import type { Message as DbMessage, Session as DbSession } from "@/types/db";
@@ -19,16 +15,16 @@ type SessionWithMessages = { session: DbSession; messages: DbMessage[] };
 
 export default function ChatPage() {
   const router = useRouter();
-  const [userId, setUserId] = useState<string>("");
+  const { me, loading: authLoading } = useAuth();
+  const userId = me?.id ?? "";
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  // True when the initial mount-time bootstrap (resolve userId, hydrate
-  // user, fetch history for the active chat session) throws unrecoverably.
-  // Surfaces the inline "Something went wrong" fallback.
-  const [bootstrapError, setBootstrapError] = useState(false);
+  // Reserved for future bootstrap-failure UI; auth/me load lives in
+  // AuthProvider now, so the chat page itself has no early-failure surface.
+  const bootstrapError = false;
   // Snapshot at mount of the user's last_session_at from public.users. This is
   // the *prior* session timestamp — it does NOT reflect activity in the
   // session that begins on this page load. Used by the header subtitle.
@@ -41,7 +37,6 @@ export default function ChatPage() {
 
   const streamWithRetry = useCallback(
     async (
-      idForRequest: string,
       currentSessionId: string | null,
       msgs: Message[],
     ): Promise<{ ok: boolean; text: string; sessionId: string | null }> => {
@@ -53,7 +48,6 @@ export default function ChatPage() {
       try {
         for await (const chunk of streamReid(
           {
-            userId: idForRequest,
             mode: "chat",
             sessionId: currentSessionId,
             messages: msgs,
@@ -75,7 +69,6 @@ export default function ChatPage() {
         try {
           for await (const chunk of streamReid(
             {
-              userId: idForRequest,
               mode: "chat",
               sessionId: currentSessionId,
               messages: msgs,
@@ -95,27 +88,15 @@ export default function ChatPage() {
   );
 
   useEffect(() => {
+    if (authLoading) return;
     if (initialized.current) return;
+    if (!me) {
+      router.replace("/login");
+      return;
+    }
     initialized.current = true;
     (async () => {
-      const id = getUserId();
-      if (!id) {
-        router.replace("/onboarding");
-        return;
-      }
-      setUserId(id);
-
-      try {
-        // last_session_at drives the "Last session: …" subtitle and is
-        // captured BEFORE this visit so it always points at a prior session.
-        const user = await getUser(id);
-        setLastSessionAt(user?.last_session_at ?? null);
-      } catch {
-        // getUser failure here means we can't show the user — surface it.
-        setBootstrapError(true);
-        setLoaded(true);
-        return;
-      }
+      setLastSessionAt(me.last_session_at ?? null);
 
       // Restore the active chat session id (if any) and load just its
       // messages. The onboarding session is excluded by virtue of the chat
@@ -124,18 +105,16 @@ export default function ChatPage() {
       if (restored) {
         setSessionId(restored);
         try {
-          // Pull a few recent sessions so we can find the stored chat session
-          // even if the onboarding session is technically more recent (it
-          // never should be once the user has chatted, but the check is cheap).
-          const res = await fetch(
-            `/api/reid/history?userId=${encodeURIComponent(id)}&limit=5`,
-            { cache: "no-store" },
-          );
+          const res = await fetch(`/api/reid/history?limit=5`, {
+            cache: "no-store",
+          });
           if (res.ok) {
             const json = (await res.json()) as {
               sessions: SessionWithMessages[];
             };
-            const current = json.sessions.find((s) => s.session.id === restored);
+            const current = json.sessions.find(
+              (s) => s.session.id === restored,
+            );
             if (current) {
               setMessages(
                 current.messages.map((m) => ({
@@ -146,15 +125,13 @@ export default function ChatPage() {
             }
           }
         } catch {
-          // History fetch is best-effort. If it fails (e.g. migration not yet
-          // applied), we render the empty state and the next POST will mint
-          // a fresh session.
+          // History fetch is best-effort.
         }
       }
 
       setLoaded(true);
     })();
-  }, [router]);
+  }, [authLoading, me, router]);
 
   async function handleSend(content: string) {
     if (!userId || isStreaming) return;
@@ -162,7 +139,7 @@ export default function ChatPage() {
     setMessages(nextMessages);
     setIsStreaming(true);
     setStreamingText("");
-    const result = await streamWithRetry(userId, sessionId, nextMessages);
+    const result = await streamWithRetry(sessionId, nextMessages);
 
     // Persist the resolved sessionId (server may have minted a fresh one on
     // the first turn) before we touch the messages list so subsequent POSTs

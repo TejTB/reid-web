@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { anthropic, REID_MODEL, buildSystemPrompt } from "@/lib/anthropic";
-import { supabase } from "@/lib/supabase";
+import { createServerSupabase } from "@/lib/supabase-server";
 import { extractName } from "@/lib/reid-summary";
 import { getReidContext } from "@/lib/reid-context";
 import {
@@ -16,13 +16,8 @@ import {
   endSession,
   createGoalsFromOnboarding,
 } from "@/lib/session-server";
-
-type ReidRequest = {
-  userId: string;
-  mode: "onboarding" | "chat";
-  sessionId?: string;
-  messages: { role: "user" | "assistant"; content: string }[];
-};
+import { reidRequestSchema } from "@/lib/validation";
+import { checkDailyMessageLimit } from "@/lib/ratelimit";
 
 // ----- SentinelStripper ---------------------------------------------------
 //
@@ -345,48 +340,75 @@ class SentinelStripper {
 // ----- POST handler -------------------------------------------------------
 
 export async function POST(req: NextRequest) {
-  let body: ReidRequest;
+  const db = await createServerSupabase();
+  const {
+    data: { user: authUser },
+  } = await db.auth.getUser();
+  if (!authUser) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
-  const { userId, mode, messages } = body;
-  let { sessionId } = body;
-  if (
-    !userId ||
-    (mode !== "onboarding" && mode !== "chat") ||
-    !Array.isArray(messages)
-  ) {
+
+  const parsedBody = reidRequestSchema.safeParse(body);
+  if (!parsedBody.success) {
     return Response.json({ error: "invalid body" }, { status: 400 });
   }
+  const { mode, messages } = parsedBody.data;
+  let sessionId: string | undefined =
+    parsedBody.data.sessionId ?? undefined;
 
-  await supabase.from("users").upsert(
-    { id: userId, onboarding_complete: false },
-    { onConflict: "id", ignoreDuplicates: true },
-  );
+  // Resolve the public.users row for this auth user (created by the
+  // on_auth_user_created trigger). Also read the subscription_status so we
+  // can decide whether to rate-limit.
+  const { data: meRow } = await db
+    .from("users")
+    .select("id, subscription_status")
+    .eq("auth_id", authUser.id)
+    .maybeSingle();
+  if (!meRow?.id) {
+    return Response.json({ error: "user not provisioned" }, { status: 401 });
+  }
+  const userId = meRow.id as string;
+  const subscriptionStatus =
+    (meRow.subscription_status as string | null) ?? "free";
+
+  if (subscriptionStatus !== "pro") {
+    const rate = await checkDailyMessageLimit(userId);
+    if (!rate.allowed) {
+      return Response.json(
+        { error: "daily_limit_exceeded", remaining: rate.remaining },
+        { status: 429 },
+      );
+    }
+  }
 
   // Resolve sessionId: honor client-supplied id only if it exists and belongs
   // to this user. Otherwise mint a fresh session.
   if (sessionId) {
-    const ok = await sessionBelongsTo(sessionId, userId);
+    const ok = await sessionBelongsTo(db, sessionId, userId);
     if (!ok) sessionId = undefined;
   }
   if (!sessionId) {
-    sessionId = await createSession(userId);
+    sessionId = await createSession(db, userId);
   }
 
   // Legacy conversations table: keep writing the user turn so existing
   // history-loading code (chat page) continues to work during the migration.
   const lastMessage = messages[messages.length - 1];
   if (lastMessage?.role === "user") {
-    await supabase
+    await db
       .from("conversations")
       .insert({ user_id: userId, role: "user", content: lastMessage.content });
   }
 
   // ----- Build the system prompt with FOUNDER CONTEXT ------------------
-  const reidContext = await getReidContext(userId);
+  const reidContext = await getReidContext(db, userId);
   const systemPrompt = buildSystemPrompt(reidContext);
 
   const upstreamMessages =
@@ -433,7 +455,7 @@ export async function POST(req: NextRequest) {
 
           // Legacy conversations table: persist the assistant turn (clean
           // text) so existing readers keep working.
-          await supabase.from("conversations").insert({
+          await db.from("conversations").insert({
             user_id: userId,
             role: "assistant",
             content: cleanedAssistantText,
@@ -456,14 +478,14 @@ export async function POST(req: NextRequest) {
             role: "assistant",
             content: cleanedAssistantText,
           });
-          await appendMessages(resolvedSessionId, userId, newTurnMessages);
+          await appendMessages(db, resolvedSessionId, userId, newTurnMessages);
 
           // Onboarding completion is handled here (not in processSentinels)
           // because we need the message history to extract the founder's
           // name.
           if (mode === "onboarding" && parsed.onboardingComplete) {
             const ob = parsed.onboardingComplete;
-            await endSession(resolvedSessionId, {
+            await endSession(db, resolvedSessionId, {
               userId,
               summary: ob.summary || null,
               taskSet: ob.task,
@@ -487,23 +509,24 @@ export async function POST(req: NextRequest) {
             if (ob.task) update.onboarding_task = ob.task;
             if (ob.goals.length > 0) update.onboarding_goals = ob.goals;
             if (extracted) {
-              const { data: existing } = await supabase
+              const { data: existing } = await db
                 .from("users")
                 .select("name")
                 .eq("id", userId)
                 .maybeSingle();
               if (!existing?.name) update.name = extracted;
             }
-            await supabase.from("users").update(update).eq("id", userId);
+            await db.from("users").update(update).eq("id", userId);
 
             if (ob.goals.length > 0) {
-              await createGoalsFromOnboarding(userId, ob.goals);
+              await createGoalsFromOnboarding(db, userId, ob.goals);
             }
 
             // Process the remaining sentinels (goal updates, email,
             // session-complete) but skip onboarding-complete since we
             // already handled it inline.
             await processSentinels(
+              db,
               {
                 ...parsed,
                 onboardingComplete: null,
@@ -515,14 +538,14 @@ export async function POST(req: NextRequest) {
             // Non-onboarding turn (or onboarding without the close
             // sentinel): write goal/session/email sentinels via the shared
             // processor, then keep the session alive.
-            await processSentinels(parsed, userId, resolvedSessionId);
+            await processSentinels(db, parsed, userId, resolvedSessionId);
 
             // If processSentinels handled SESSION_COMPLETE it already
             // wrapped endSession internally. Otherwise we still need to
             // bump message_count and refresh ended_at so the timeline
             // reflects this turn.
             if (!parsed.sessionComplete) {
-              await endSession(resolvedSessionId, {
+              await endSession(db, resolvedSessionId, {
                 userId,
                 messageCountDelta: newTurnMessages.length,
                 bumpUserCounters: false,
@@ -531,12 +554,12 @@ export async function POST(req: NextRequest) {
               // SESSION_COMPLETE path: still need to add this turn's
               // message_count, which processSentinels' endSession call did
               // not include. Apply the delta now.
-              const { data: cur } = await supabase
+              const { data: cur } = await db
                 .from("sessions")
                 .select("message_count")
                 .eq("id", resolvedSessionId)
                 .maybeSingle();
-              await supabase
+              await db
                 .from("sessions")
                 .update({
                   message_count:

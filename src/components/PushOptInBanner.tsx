@@ -20,7 +20,6 @@
 import { useEffect, useState } from "react";
 
 interface Props {
-  userId: string;
   name: string | null;
   sessionCount: number;
 }
@@ -45,7 +44,7 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   return output;
 }
 
-async function enablePush(userId: string): Promise<void> {
+async function enablePush(): Promise<void> {
   if (!("serviceWorker" in navigator)) return;
   try {
     const reg = await navigator.serviceWorker.register("/sw.js");
@@ -68,7 +67,7 @@ async function enablePush(userId: string): Promise<void> {
     await fetch("/api/push/subscribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, subscription: sub.toJSON() }),
+      body: JSON.stringify({ subscription: sub.toJSON() }),
     });
     try {
       localStorage.setItem(STORAGE_KEY, "true");
@@ -80,7 +79,7 @@ async function enablePush(userId: string): Promise<void> {
   }
 }
 
-export default function PushOptInBanner({ userId, sessionCount }: Props) {
+export default function PushOptInBanner({ sessionCount }: Props) {
   // Eligibility is decided client-side on mount. Server-render leaves the
   // banner null so it never flashes during hydration.
   const [eligible, setEligible] = useState(false);
@@ -102,7 +101,7 @@ export default function PushOptInBanner({ userId, sessionCount }: Props) {
   if (!eligible || dismissed) return null;
 
   function handleEnable() {
-    void enablePush(userId).finally(() => setDismissed(true));
+    void enablePush().finally(() => setDismissed(true));
   }
 
   function handleDismiss() {

@@ -3,17 +3,17 @@
 // Wires the `web-push` library with our VAPID identity at module load, then
 // exposes `sendPushToUser` for the cron pipeline.
 //
-// All DB access goes through the anon `supabase` client — `push_subscriptions`
-// has anon-permissive RLS and there's no service-role key in this project.
+// The caller passes a SupabaseClient (typically the service-role admin
+// client) so RLS doesn't block the cron from reading every user's
+// subscriptions.
 //
 // Cleanup contract: when the push service responds with HTTP 410 (Gone), the
-// subscription has been revoked by the user (e.g. they cleared site data or
-// disabled notifications). We delete the row so we don't try the dead
-// endpoint again. Other errors (5xx, network) are swallowed and the next
-// subscription is attempted — the cron loop must not die on one bad endpoint.
+// subscription has been revoked. We delete the row so we don't try the dead
+// endpoint again. Other errors are swallowed and the next subscription is
+// attempted — the cron loop must not die on one bad endpoint.
 
 import webpush from "web-push";
-import { supabase } from "./supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const VAPID_PUBLIC = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY;
@@ -53,13 +53,14 @@ export interface PushPayload {
 /** Sends a push payload to every subscription registered for the user.
  *  Returns the count of successful deliveries. Never throws. */
 export async function sendPushToUser(
+  db: SupabaseClient,
   userId: string,
   payload: PushPayload,
 ): Promise<number> {
   if (!userId) return 0;
   if (!configured) return 0;
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("push_subscriptions")
     .select("id, user_id, endpoint, p256dh, auth")
     .eq("user_id", userId);
@@ -89,17 +90,15 @@ export async function sendPushToUser(
     }
     const reason = outcome.reason as { statusCode?: number } | undefined;
     if (reason && reason.statusCode === 410) {
-      // Endpoint is permanently gone. Delete the row.
       try {
-        await supabase
+        await db
           .from("push_subscriptions")
           .delete()
           .eq("endpoint", subs[i].endpoint);
       } catch {
-        // ignore — RLS or transient; the next run will retry the delete.
+        // ignore — transient; the next run will retry the delete.
       }
     } else {
-      // Transient / unknown. Log but keep the row; we'll try next cron tick.
       console.error("[push] send failed:", reason);
     }
   }

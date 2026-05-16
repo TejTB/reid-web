@@ -1,21 +1,20 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearSession } from "@/lib/session";
+import { signOut } from "@/lib/session";
 
 // Mounted once globally (inside AppShell). Listens for the `reid:open-settings`
 // CustomEvent dispatched by the sidebar gear button and renders a centered
 // glass modal. Closes on Escape, overlay click, or Cancel.
 //
-// "Start over" is two-tap to guard against an accidental reset:
-//   1. First tap flips the button into the confirm state ("Tap again to
-//      confirm") and exposes a Back button.
-//   2. Second tap calls `clearSession()` — which wipes reid:userId,
-//      reid:onboarded, the chat session key, and every reid:task:* flag —
-//      then redirects to /onboarding.
+// "Sign out" is two-tap to guard against an accidental session drop:
+//   1. First tap flips the button into the confirm state and exposes Back.
+//   2. Second tap calls `signOut()` — which clears the Supabase auth cookie
+//      AND wipes the legacy localStorage keys (reid:userId, reid:onboarded,
+//      reid:chatSessionId, reid:push:asked, and every reid:task:* flag) —
+//      then redirects to /login.
 //
-// Closing the modal at any point resets the confirm state, so the user
-// always starts fresh on the next open.
+// Closing the modal at any point resets the confirm state.
 export default function SettingsModal() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -58,16 +57,15 @@ export default function SettingsModal() {
     };
   }, [open, close]);
 
-  function onStartOverClick() {
+  async function onStartOverClick() {
     if (!confirming) {
       setConfirming(true);
       return;
     }
-    // Confirmed — wipe and route. clearSession() already strips reid:userId,
-    // reid:onboarded, the chat session key, and every reid:task:* flag, so
-    // we don't need a second sweep here.
-    clearSession();
-    router.replace("/onboarding");
+    // Confirmed — drop the Supabase auth cookie + wipe legacy localStorage,
+    // then send the user back to /login.
+    await signOut();
+    router.replace("/login");
     router.refresh();
   }
 
@@ -112,7 +110,7 @@ export default function SettingsModal() {
             letterSpacing: "-0.02em",
           }}
         >
-          {confirming ? "Start over?" : "Session settings"}
+          {confirming ? "Sign out?" : "Session settings"}
         </h2>
         <p
           className="font-sans"
@@ -124,8 +122,8 @@ export default function SettingsModal() {
           }}
         >
           {confirming
-            ? "This clears your local session and returns you to onboarding. Your data stays in Supabase."
-            : "Your conversations are saved to your account. Resetting clears your local session only — your data stays in Supabase."}
+            ? "This signs you out of this device and returns you to the sign-in screen. Your data stays in your account."
+            : "Your conversations are saved to your account. Signing out only ends this session on this device."}
         </p>
         <div className="flex" style={{ gap: 12 }}>
           <button
@@ -175,7 +173,7 @@ export default function SettingsModal() {
               e.currentTarget.style.transform = "translateY(0)";
             }}
           >
-            {confirming ? "Yes, start over" : "Start over"}
+            {confirming ? "Yes, sign out" : "Sign out"}
           </button>
         </div>
       </div>

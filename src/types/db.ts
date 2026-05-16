@@ -1,5 +1,8 @@
+export type SubscriptionStatus = "free" | "pro" | "cancelled" | "past_due";
+
 export interface User {
   id: string;
+  auth_id: string | null;
   email: string | null;
   name: string | null;
   onboarding_complete: boolean;
@@ -12,6 +15,11 @@ export interface User {
   session_count: number;
   streak_days: number;
   created_at: string;
+  stripe_customer_id: string | null;
+  subscription_status: SubscriptionStatus;
+  subscription_id: string | null;
+  subscribed_at: string | null;
+  subscription_period_end: string | null;
 }
 
 export interface Conversation {

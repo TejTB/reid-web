@@ -3,10 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { useAuth } from "@/components/AuthProvider";
 import {
-  getUserId,
-  getGoals,
-  getGoalEvents,
+  getMyGoals,
+  getMyGoalEvents,
   type GoalEventWithGoal,
 } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
@@ -37,7 +37,8 @@ const FLASH_MS = 2000;
  *  anon-permissive (see migration 20260516180000). */
 export default function GoalsPage() {
   const router = useRouter();
-  const [userId, setUserId] = useState<string | null>(null);
+  const { me, loading: authLoading } = useAuth();
+  const userId = me?.id ?? null;
   const [goals, setGoals] = useState<Goal[]>([]);
   const [events, setEvents] = useState<GoalEventWithGoal[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -75,24 +76,21 @@ export default function GoalsPage() {
 
   // Initial load.
   useEffect(() => {
+    if (authLoading) return;
+    if (!me) {
+      router.replace("/login");
+      return;
+    }
     let cancelled = false;
     (async () => {
-      const id = getUserId();
-      if (!id) {
-        router.replace("/onboarding");
-        return;
-      }
-      setUserId(id);
       try {
         const [goalsRows, eventRows] = await Promise.all([
-          getGoals(id),
-          getGoalEvents(id, 30),
+          getMyGoals(),
+          getMyGoalEvents(30),
         ]);
         if (cancelled) return;
         setGoals(goalsRows);
         setEvents(eventRows);
-        // Anything completed before this page mounted is already
-        // celebrated — never re-fire the overlay for it.
         for (const g of goalsRows) {
           if (g.completed_at) celebratedRef.current.add(g.id);
         }
@@ -106,7 +104,7 @@ export default function GoalsPage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [authLoading, me, router]);
 
   // Realtime subscription. Re-subscribes only when userId changes.
   useEffect(() => {
@@ -176,7 +174,7 @@ export default function GoalsPage() {
           // joined goal title/unit without merge gymnastics.
           const id = userIdRef.current;
           if (!id) return;
-          void getGoalEvents(id, 30).then((rows) => {
+          void getMyGoalEvents(30).then((rows) => {
             setEvents(rows);
           });
         },

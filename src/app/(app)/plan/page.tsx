@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getUserId, getSessions } from "@/lib/session";
-import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/components/AuthProvider";
+import { getMySessions } from "@/lib/session";
 import type { Session, User } from "@/types/db";
 
 const MONTHS_SHORT = [
@@ -65,35 +65,25 @@ type TimelineRow =
 
 export default function PlanPage() {
   const router = useRouter();
+  const { me, loading: authLoading } = useAuth();
   const [user, setUser] = useState<User | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loaded, setLoaded] = useState(false);
-  // True when the parallel user + sessions load throws — surfaces the
-  // inline "Something went wrong" fallback in place of the timeline.
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!me) {
+      router.replace("/login");
+      return;
+    }
     let cancelled = false;
-    (async () => {
-      const id = getUserId();
-      if (!id) {
-        router.replace("/onboarding");
-        return;
-      }
+    void (async () => {
+      if (cancelled) return;
+      setUser(me);
       try {
-        // Pull user + sessions in parallel — both are anon-RLS, no server roundtrip.
-        const [userRes, sessionRows] = await Promise.all([
-          supabase
-            .from("users")
-            .select(
-              "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, last_session_at, session_count, streak_days, created_at",
-            )
-            .eq("id", id)
-            .maybeSingle(),
-          getSessions(id),
-        ]);
+        const sessionRows = await getMySessions();
         if (cancelled) return;
-        setUser((userRes.data as User | null) ?? null);
         setSessions(sessionRows);
         setLoaded(true);
       } catch {
@@ -105,7 +95,7 @@ export default function PlanPage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [authLoading, me, router]);
 
   // Build the rendered rows: oldest first.
   //

@@ -1,11 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { Home, MessageCircle, Map, ListTodo, Settings, Target } from "lucide-react";
 import LogoMark from "./LogoMark";
 import NavItem from "./NavItem";
 import SettingsModal from "./SettingsModal";
-import { getUserId, getUser } from "@/lib/session";
+import { useMe } from "./AuthProvider";
 
 const NAV = [
   { href: "/home", label: "Home", icon: Home },
@@ -23,23 +23,12 @@ function openSettings() {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [name, setName] = useState<string | null>(null);
+  const me = useMe();
   const [settingsHovered, setSettingsHovered] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const id = getUserId();
-      if (!id) return;
-      const u = await getUser(id);
-      if (cancelled) return;
-      setName(u?.name ?? null);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+  const name =
+    me?.name?.trim() ||
+    (me?.email ? me.email.split("@")[0] : null);
   const initial = name?.charAt(0).toUpperCase() ?? "·";
 
   return (
@@ -104,8 +93,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {/* Identity chip: avatar initial + name. The previous decorative green
             "online" dot was removed — it had no real wiring (no presence
             channel, no realtime subscription) so it was misrepresenting
-            state. The name + initial are sourced from public.users.name and
-            fall back to "Friend" only if the user hasn't supplied one yet. */}
+            state. The name is sourced from public.users.name, falling back to
+            the local-part of the email. Identity row hides when neither name
+            nor email is available. */}
         {name && (
           <div
             className="flex items-center gap-3"

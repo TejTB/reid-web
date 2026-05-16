@@ -2,9 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, CheckCircle } from "lucide-react";
-import { getUserId } from "@/lib/session";
-import { supabase } from "@/lib/supabase";
-import type { User } from "@/types/db";
+import { useAuth } from "@/components/AuthProvider";
 
 const MONTHS_SHORT = [
   "Jan",
@@ -43,79 +41,53 @@ type Task = {
 
 export default function TasksPage() {
   const router = useRouter();
-  const [userId, setUserId] = useState<string | null>(null);
+  const { me, loading: authLoading } = useAuth();
+  const userId = me?.id ?? null;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [doneMap, setDoneMap] = useState<Record<number, boolean>>({});
   const [loaded, setLoaded] = useState(false);
-  // True when the supabase load throws — surfaces the inline "Something
-  // went wrong" fallback in place of the task list.
-  const [error, setError] = useState(false);
+  const error = false;
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!me) {
+      router.replace("/login");
+      return;
+    }
+
     let cancelled = false;
-    (async () => {
-      const id = getUserId();
-      if (!id) {
-        router.replace("/onboarding");
-        return;
+    void (async () => {
+      const collected: Task[] = [];
+      const seedTask = me.onboarding_task?.trim();
+      if (seedTask) {
+        collected.push({
+          index: 0,
+          text: seedTask,
+          source: "Session 1",
+          assignedDate: formatAssignedDate(me.created_at),
+        });
       }
 
+      const map: Record<number, boolean> = {};
       try {
-        const { data, error: supaError } = await supabase
-          .from("users")
-          .select(
-            "id, email, name, onboarding_complete, onboarding_summary, onboarding_task, created_at",
-          )
-          .eq("id", id)
-          .maybeSingle();
-
-        if (cancelled) return;
-        if (supaError) {
-          setError(true);
-          setLoaded(true);
-          return;
+        for (const t of collected) {
+          map[t.index] =
+            localStorage.getItem(`reid:task:${me.id}:${t.index}:done`) ===
+            "true";
         }
-
-        const user = data as User | null;
-        const collected: Task[] = [];
-
-        const seedTask = user?.onboarding_task?.trim();
-        if (seedTask) {
-          collected.push({
-            index: 0,
-            text: seedTask,
-            source: "Session 1",
-            assignedDate: formatAssignedDate(user?.created_at),
-          });
-        }
-
-        // Hydrate done flags from localStorage. Keys are
-        // `reid:task:{userId}:{index}:done` — matches /home so toggling on
-        // either screen stays in sync.
-        const map: Record<number, boolean> = {};
-        try {
-          for (const t of collected) {
-            map[t.index] =
-              localStorage.getItem(`reid:task:${id}:${t.index}:done`) === "true";
-          }
-        } catch {
-          // localStorage unavailable — assume all undone.
-        }
-
-        setUserId(id);
-        setTasks(collected);
-        setDoneMap(map);
-        setLoaded(true);
       } catch {
-        if (cancelled) return;
-        setError(true);
-        setLoaded(true);
+        // localStorage unavailable — assume all undone.
       }
+
+      if (cancelled) return;
+      setTasks(collected);
+      setDoneMap(map);
+      setLoaded(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [authLoading, me, router]);
 
   function toggle(taskIndex: number) {
     if (!userId) return;

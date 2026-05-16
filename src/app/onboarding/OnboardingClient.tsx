@@ -6,34 +6,17 @@ import ProgressDots from "@/components/ProgressDots";
 import ChatStream from "@/components/ChatStream";
 import ChatInput from "@/components/ChatInput";
 import OnboardingComplete from "@/components/OnboardingComplete";
+import { useAuth } from "@/components/AuthProvider";
 import { streamReid } from "@/lib/reid";
-import {
-  ensureUserId,
-  setUserName,
-  markOnboardingComplete,
-  setOnboardedFlag,
-  getUser,
-} from "@/lib/session";
-import { parseOnboardingClose, summaryForHome } from "@/lib/reid-summary";
+import { parseOnboardingClose } from "@/lib/reid-summary";
 import type { Message } from "@/types/chat";
-
-function extractName(raw: string): string | null {
-  const cleaned = raw
-    .trim()
-    .replace(/^(i'?m|my name is|call me|it's|its)\s+/i, "")
-    .split(/[\s,.!?]/)[0];
-  if (!cleaned) return null;
-  if (cleaned.length > 40) return null;
-  return cleaned;
-}
 
 export default function OnboardingClient() {
   const router = useRouter();
-  const [userId, setUserId] = useState<string>("");
+  const { me, loading: authLoading, refresh } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  const [awaitingName, setAwaitingName] = useState(true);
   // Two stage completion: first fade chat + input, then mount the overlay.
   const [isCompleting, setIsCompleting] = useState(false);
   const [showComplete, setShowComplete] = useState(false);
@@ -42,46 +25,27 @@ export default function OnboardingClient() {
 
   const userTurnCount = messages.filter((m) => m.role === "user").length;
 
-  async function triggerCompletion(
-    idForRequest: string,
-    rawAssistantText: string,
-  ) {
+  async function triggerCompletion() {
     if (completionTriggered.current) return;
     completionTriggered.current = true;
-    const close = parseOnboardingClose(rawAssistantText);
-    const summary = summaryForHome(close);
-    const task = close.task;
 
-    // (a) Set BOTH localStorage flags synchronously. The root page reads these
-    // and is the authoritative redirect gate after onboarding.
-    setOnboardedFlag(idForRequest);
+    // The server flips users.onboarding_complete=true the moment it sees
+    // [ONBOARDING_COMPLETE] in the model output. Pull a fresh snapshot of
+    // the user row so subsequent routes see the new state.
+    await refresh();
 
-    // (b) Update Supabase users.onboarding_complete=true. Awaited so the
-    // animation only starts once persistence is confirmed. Server may have
-    // already written these on the streaming end hook — this is a fallback.
-    await markOnboardingComplete(idForRequest, summary, task);
-
-    // (c) Belt-and-braces: re-assert both flags as literal localStorage calls
-    // immediately before the animation begins. setOnboardedFlag in (a) does
-    // the same work via a helper; this is the contract spelled out in source
-    // so the redirect gate's source of truth is obvious at the call site.
-    localStorage.setItem("reid:userId", idForRequest);
-    localStorage.setItem("reid:onboarded", "true");
-
-    // (d) Animation only begins after (a)–(c) have all completed.
     setIsCompleting(true);
     setTimeout(() => setShowComplete(true), 700);
     setTimeout(() => router.replace("/home"), 2500);
   }
 
-  async function runStream(seed: Message[], idForRequest: string) {
+  async function runStream(seed: Message[]) {
     setIsStreaming(true);
     setStreamingText("");
     let acc = "";
     let firstAttemptFailed = false;
     try {
       for await (const chunk of streamReid({
-        userId: idForRequest,
         mode: "onboarding",
         messages: seed,
       })) {
@@ -101,7 +65,6 @@ export default function OnboardingClient() {
       acc = "";
       try {
         for await (const chunk of streamReid({
-          userId: idForRequest,
           mode: "onboarding",
           messages: seed,
         })) {
@@ -124,11 +87,8 @@ export default function OnboardingClient() {
 
     // The server strips sentinels from the stream before they reach us, so
     // parseOnboardingClose(acc) will report hasSentinel=false on fresh
-    // Sprint 5+ traffic. We keep it as a defensive fallback for any path
-    // that bypasses the server filter, but the canonical signal is now the
-    // user's onboarding_complete flag — the server flips it the moment it
-    // sees [ONBOARDING_COMPLETE] in the model output, before this stream
-    // closes.
+    // traffic. We keep it as a defensive fallback for any path that bypasses
+    // the server filter.
     const close = parseOnboardingClose(acc);
     const cleaned = close.hasSentinel ? close.body : acc;
 
@@ -137,53 +97,53 @@ export default function OnboardingClient() {
     setIsStreaming(false);
 
     if (close.hasSentinel) {
-      void triggerCompletion(idForRequest, acc);
+      void triggerCompletion();
       return;
     }
 
-    // Server-side signal: the route writes onboarding_complete=true as soon
-    // as the closing sentinel is observed in the model output. Check the
-    // user row after the stream closes — if it flipped, we're done.
+    // Server-side signal: refresh the auth context to see whether the route
+    // flipped onboarding_complete.
     try {
-      const u = await getUser(idForRequest);
-      if (u?.onboarding_complete === true) {
-        void triggerCompletion(idForRequest, acc);
-        return;
-      }
+      await refresh();
     } catch {
-      // best-effort — fall through to the turn-count fallback
-    }
-
-    const userTurnsAfter = seed.filter((m) => m.role === "user").length;
-    if (userTurnsAfter >= 10) {
-      void triggerCompletion(idForRequest, acc);
+      // best-effort
     }
   }
 
+  // Drive completion off the refreshed `me`.
   useEffect(() => {
+    if (completionTriggered.current) return;
+    if (me?.onboarding_complete) {
+      void triggerCompletion();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.onboarding_complete]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!me) {
+      router.replace("/login");
+      return;
+    }
+    if (me.onboarding_complete) {
+      router.replace("/home");
+      return;
+    }
     if (initialized.current) return;
     initialized.current = true;
-    const id = ensureUserId();
-    setUserId(id);
-    void runStream([], id);
+    void runStream([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading, me, router]);
 
   async function handleSend(content: string) {
-    if (!userId || isStreaming || isCompleting) return;
-
-    if (awaitingName) {
-      const name = extractName(content);
-      if (name) setUserName(userId, name);
-      setAwaitingName(false);
-    }
+    if (!me || isStreaming || isCompleting) return;
 
     const nextMessages: Message[] = [
       ...messages,
       { role: "user", content },
     ];
     setMessages(nextMessages);
-    await runStream(nextMessages, userId);
+    await runStream(nextMessages);
   }
 
   return (

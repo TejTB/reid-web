@@ -1,11 +1,10 @@
 // Server-side helpers for the new sessions + messages tables.
 //
-// These run inside route handlers (server runtime) and use the same anon
-// supabase client as the rest of the app — RLS on public.sessions and
-// public.messages is anon-permissive (see migration 20260516120000). No
-// service role key is involved.
+// These run inside route handlers. Every helper accepts a request-scoped
+// SupabaseClient (built from the auth cookie via `createServerSupabase`) so
+// RLS evaluates against the signed-in user. No service-role bypass.
 
-import { supabase } from "./supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Message, Session } from "@/types/db";
 
 /** Shape of a single goal item captured during onboarding. The Reid model
@@ -25,8 +24,11 @@ export interface OnboardingGoalInput {
 
 /** Returns the user's sessions, newest first, with the seven columns the
  *  UI cares about. */
-export async function getSessions(userId: string): Promise<Session[]> {
-  const { data, error } = await supabase
+export async function getSessions(
+  db: SupabaseClient,
+  userId: string,
+): Promise<Session[]> {
+  const { data, error } = await db
     .from("sessions")
     .select("id, user_id, started_at, ended_at, summary, task_set, message_count")
     .eq("user_id", userId)
@@ -37,8 +39,11 @@ export async function getSessions(userId: string): Promise<Session[]> {
 
 /** Creates a new session row and returns its id. Throws on failure — the
  *  route handler is responsible for surfacing the error. */
-export async function createSession(userId: string): Promise<string> {
-  const { data, error } = await supabase
+export async function createSession(
+  db: SupabaseClient,
+  userId: string,
+): Promise<string> {
+  const { data, error } = await db
     .from("sessions")
     .insert({ user_id: userId })
     .select("id")
@@ -54,11 +59,10 @@ export async function createSession(userId: string): Promise<string> {
  *  the [ONBOARDING_COMPLETE] sentinel). Also bumps the user's
  *  last_session_at and session_count.
  *
- *  We read the current session_count first because there is no atomic
- *  increment available via supabase-js with anon RLS. This is best-effort
- *  — concurrent turns on the same user could under-count, which is fine
- *  for the current single-device, single-tab usage model. */
+ *  No atomic increment available via supabase-js with RLS; this is
+ *  best-effort and matches the single-tab usage model. */
 export async function endSession(
+  db: SupabaseClient,
   sessionId: string,
   options: {
     userId: string;
@@ -76,9 +80,7 @@ export async function endSession(
     bumpUserCounters = false,
   } = options;
 
-  // Read current message_count so we can apply the delta without a
-  // service-role atomic increment.
-  const { data: current } = await supabase
+  const { data: current } = await db
     .from("sessions")
     .select("message_count")
     .eq("id", sessionId)
@@ -93,15 +95,15 @@ export async function endSession(
   if (summary !== undefined && summary !== null) sessionUpdate.summary = summary;
   if (taskSet !== undefined && taskSet !== null) sessionUpdate.task_set = taskSet;
 
-  await supabase.from("sessions").update(sessionUpdate).eq("id", sessionId);
+  await db.from("sessions").update(sessionUpdate).eq("id", sessionId);
 
   if (bumpUserCounters) {
-    const { data: u } = await supabase
+    const { data: u } = await db
       .from("users")
       .select("session_count")
       .eq("id", userId)
       .maybeSingle();
-    await supabase
+    await db
       .from("users")
       .update({
         last_session_at: new Date().toISOString(),
@@ -109,9 +111,7 @@ export async function endSession(
       })
       .eq("id", userId);
   } else {
-    // Even without bumping the counter, keep last_session_at fresh — the
-    // home screen uses it for the "Last session: …" subtitle.
-    await supabase
+    await db
       .from("users")
       .update({ last_session_at: new Date().toISOString() })
       .eq("id", userId);
@@ -120,6 +120,7 @@ export async function endSession(
 
 /** Bulk-inserts message rows for the given session/user. */
 export async function appendMessages(
+  db: SupabaseClient,
   sessionId: string,
   userId: string,
   msgs: { role: "user" | "assistant"; content: string }[],
@@ -131,18 +132,17 @@ export async function appendMessages(
     role: m.role,
     content: m.content,
   }));
-  await supabase.from("messages").insert(rows);
+  await db.from("messages").insert(rows);
 }
 
-/** Loads all messages for a single session in ascending order. The user_id
- *  filter is defensive — even with anon-permissive RLS, we never want a
- *  client mis-supplying a sessionId to read another user's history. Returns
- *  empty array on miss/error. */
+/** Loads all messages for a single session in ascending order. user_id is a
+ *  defensive filter on top of RLS. */
 export async function getMessagesForSession(
+  db: SupabaseClient,
   userId: string,
   sessionId: string,
 ): Promise<Message[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("messages")
     .select("id, session_id, user_id, role, content, created_at")
     .eq("session_id", sessionId)
@@ -156,10 +156,11 @@ export async function getMessagesForSession(
  *  every message in each, returned in chronological order (oldest session
  *  first). Used to render multi-session chat history with dividers. */
 export async function getRecentSessionsWithMessages(
+  db: SupabaseClient,
   userId: string,
   limit: number,
 ): Promise<{ session: Session; messages: Message[] }[]> {
-  const { data: sessionRows, error } = await supabase
+  const { data: sessionRows, error } = await db
     .from("sessions")
     .select("id, user_id, started_at, ended_at, summary, task_set, message_count")
     .eq("user_id", userId)
@@ -170,7 +171,7 @@ export async function getRecentSessionsWithMessages(
   const sessions = sessionRows as Session[];
   const ids = sessions.map((s) => s.id);
 
-  const { data: msgRows } = await supabase
+  const { data: msgRows } = await db
     .from("messages")
     .select("id, session_id, user_id, role, content, created_at")
     .in("session_id", ids)
@@ -185,7 +186,6 @@ export async function getRecentSessionsWithMessages(
     grouped.set(m.session_id, arr);
   }
 
-  // Return chronological (oldest session first) so the UI can render top→bottom.
   return sessions
     .slice()
     .reverse()
@@ -195,14 +195,13 @@ export async function getRecentSessionsWithMessages(
     }));
 }
 
-/** Returns true iff the session exists AND belongs to the given user.
- *  Used by the API route to decide whether to honor a client-supplied
- *  sessionId or create a fresh one. */
+/** Returns true iff the session exists AND belongs to the given user. */
 export async function sessionBelongsTo(
+  db: SupabaseClient,
   sessionId: string,
   userId: string,
 ): Promise<boolean> {
-  const { data } = await supabase
+  const { data } = await db
     .from("sessions")
     .select("id, user_id")
     .eq("id", sessionId)
@@ -212,14 +211,9 @@ export async function sessionBelongsTo(
 
 /** Records a goal_event, advances the goal's current_value, and stamps
  *  completed_at the first time current_value crosses target_value. Returns
- *  true on success.
- *
- *  No transactions — supabase-js with anon RLS can't open one. This is a
- *  best-effort pipeline that matches the rest of the codebase: insert the
- *  event, read the goal, compute the new value, write it back. Concurrent
- *  deltas on the same goal could miscount, which is fine for the current
- *  single-device usage model. */
+ *  true on success. Best-effort with no transaction. */
 export async function applyGoalDelta(
+  db: SupabaseClient,
   goalId: string,
   userId: string,
   sessionId: string | null,
@@ -228,7 +222,7 @@ export async function applyGoalDelta(
 ): Promise<boolean> {
   if (!goalId || !userId) return false;
 
-  const { error: eventError } = await supabase.from("goal_events").insert({
+  const { error: eventError } = await db.from("goal_events").insert({
     goal_id: goalId,
     user_id: userId,
     session_id: sessionId,
@@ -237,7 +231,7 @@ export async function applyGoalDelta(
   });
   if (eventError) return false;
 
-  const { data: goal, error: readError } = await supabase
+  const { data: goal, error: readError } = await db
     .from("goals")
     .select("current_value, target_value, completed_at")
     .eq("id", goalId)
@@ -254,7 +248,7 @@ export async function applyGoalDelta(
     update.completed_at = new Date().toISOString();
   }
 
-  const { error: updateError } = await supabase
+  const { error: updateError } = await db
     .from("goals")
     .update(update)
     .eq("id", goalId)
@@ -267,6 +261,7 @@ export async function applyGoalDelta(
  *  primary keeps the flag and the rest are downgraded. Returns true on
  *  success (or true vacuously if the input is empty). */
 export async function createGoalsFromOnboarding(
+  db: SupabaseClient,
   userId: string,
   goalsJson: OnboardingGoalInput[],
 ): Promise<boolean> {
@@ -293,6 +288,6 @@ export async function createGoalsFromOnboarding(
     };
   });
 
-  const { error } = await supabase.from("goals").insert(rows);
+  const { error } = await db.from("goals").insert(rows);
   return !error;
 }

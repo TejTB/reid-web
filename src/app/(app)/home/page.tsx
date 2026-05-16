@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
 import PushOptInBanner from "@/components/PushOptInBanner";
-import { getUserId, getUser } from "@/lib/session";
+import { useAuth } from "@/components/AuthProvider";
 import type { User } from "@/types/db";
 
 function greeting() {
@@ -61,64 +61,40 @@ function streakTextFor(user: LoadedUser, now: Date = new Date()): string | null 
 
 export default function HomePage() {
   const router = useRouter();
+  const { me, loading } = useAuth();
   const [user, setUser] = useState<LoadedUser | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [taskDone, setTaskDone] = useState(false);
-  // True when getUser threw or returned in an unrecoverable state and the user
-  // wasn't redirected away to /onboarding. Drives the inline error fallback.
-  const [error, setError] = useState(false);
 
   useEffect(() => {
+    if (loading) return;
+    if (!me) {
+      router.replace("/login");
+      return;
+    }
+    if (!me.onboarding_complete) {
+      router.replace("/onboarding");
+      return;
+    }
     let cancelled = false;
-    (async () => {
-      const id = getUserId();
-      if (!id) {
-        router.replace("/onboarding");
-        return;
-      }
+    void (async () => {
+      if (cancelled) return;
+      setUser(me);
+      let done = false;
       try {
-        const u = await getUser(id);
-        if (cancelled) return;
-        if (!u || u.onboarding_complete === false) {
-          router.replace("/onboarding");
-          return;
-        }
-        setUser(u);
-        // Task 0 is the onboarding task — tasks page uses the same index.
-        try {
-          const stored = localStorage.getItem(`reid:task:${id}:0:done`);
-          setTaskDone(stored === "true");
-        } catch {
-          setTaskDone(false);
-        }
-        setLoaded(true);
+        done =
+          localStorage.getItem(`reid:task:${me.id}:0:done`) === "true";
       } catch {
-        if (cancelled) return;
-        setError(true);
-        setLoaded(true);
+        done = false;
       }
+      if (cancelled) return;
+      setTaskDone(done);
+      setLoaded(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [router]);
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center pt-32 gap-4">
-        <p className="font-serif italic text-text-dim text-lg">
-          Something went wrong.
-        </p>
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          className="text-sm text-accent underline font-sans"
-        >
-          Try again
-        </button>
-      </div>
-    );
-  }
+  }, [loading, me, router]);
 
   if (!loaded) {
     return (
@@ -156,7 +132,6 @@ export default function HomePage() {
     <div className="mx-auto w-full max-w-[720px] px-6 md:px-6 pt-[60px] pb-12 flex flex-col">
       {user && (
         <PushOptInBanner
-          userId={user.id}
           name={user.name}
           sessionCount={sessionCount}
         />

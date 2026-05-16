@@ -17,13 +17,13 @@
 // Name extraction during onboarding is NOT handled here. The route handler
 // does it separately because only the route has the message history.
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   applyGoalDelta,
   createGoalsFromOnboarding,
   endSession,
   type OnboardingGoalInput,
 } from "./session-server";
-import { supabase } from "./supabase";
 
 // ----- types --------------------------------------------------------------
 
@@ -232,6 +232,7 @@ export function parseSentinels(raw: string): ParsedSentinels {
  *  Onboarding name extraction is NOT done here -- the route handler does it
  *  with access to the message history. */
 export async function processSentinels(
+  db: SupabaseClient,
   parsed: ParsedSentinels,
   userId: string,
   sessionId: string | null,
@@ -240,7 +241,7 @@ export async function processSentinels(
 
   // --- Goal updates ---
   if (parsed.goalUpdates.length > 0) {
-    const { data: goalRows } = await supabase
+    const { data: goalRows } = await db
       .from("goals")
       .select("id, title")
       .eq("user_id", userId);
@@ -253,6 +254,7 @@ export async function processSentinels(
       if (!goalId) continue;
       try {
         await applyGoalDelta(
+          db,
           goalId,
           userId,
           sessionId,
@@ -269,7 +271,7 @@ export async function processSentinels(
   if (parsed.onboardingComplete) {
     const ob = parsed.onboardingComplete;
     try {
-      await supabase
+      await db
         .from("users")
         .update({
           onboarding_complete: true,
@@ -283,7 +285,7 @@ export async function processSentinels(
     }
     if (ob.goals.length > 0) {
       try {
-        await createGoalsFromOnboarding(userId, ob.goals);
+        await createGoalsFromOnboarding(db, userId, ob.goals);
       } catch {
         // ignore
       }
@@ -293,7 +295,7 @@ export async function processSentinels(
   // --- Session complete ---
   if (parsed.sessionComplete && sessionId) {
     try {
-      await endSession(sessionId, {
+      await endSession(db, sessionId, {
         userId,
         summary: parsed.sessionComplete.summary,
         taskSet: parsed.sessionComplete.task,
@@ -307,7 +309,7 @@ export async function processSentinels(
   // --- Email captured ---
   if (parsed.emailCaptured) {
     try {
-      await supabase
+      await db
         .from("users")
         .update({ email: parsed.emailCaptured })
         .eq("id", userId);
