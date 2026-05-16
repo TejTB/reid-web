@@ -1,13 +1,21 @@
 // Parser for Reid's onboarding-complete closing message.
 //
-// Two shapes are accepted:
+// DEPRECATED for new code paths: as of Sprint 5 the route uses
+// `parseSentinels` from `./reid-sentinels` which supersedes
+// `parseOnboardingClose` and `summaryForHome`. Those exports are kept here
+// because:
+//   - the onboarding client still parses raw streamed text for legacy reasons
+//   - `extractName` is still the canonical name extractor used by the route
 //
-// 1. New (Sprint 4+) structured one-liner — what Reid emits today:
+// New code should call `parseSentinels` instead.
+//
+// Two shapes are accepted by the legacy parser:
+//
+// 1. Structured one-liner:
 //
 //      [ONBOARDING_COMPLETE] summary="…one sentence…" task="…one concrete action…"
 //
-// 2. Legacy labeled block (kept for backward compatibility with historical
-//    conversations already persisted):
+// 2. Legacy labeled block (very old persisted conversations):
 //
 //      [ONBOARDING_COMPLETE]
 //      Here is what I heard: ...
@@ -35,6 +43,7 @@ export type OnboardingClose = {
   body: string;
 };
 
+/** @deprecated Use `parseSentinels` from `./reid-sentinels` instead. */
 export function parseOnboardingClose(text: string): OnboardingClose {
   const trimmed = text.trim();
   const hasSentinel =
@@ -92,7 +101,8 @@ function extractLabeled(body: string, label: RegExp): string | null {
 
 /** Summary string for the home "YOUR FOCUS" card. Prefers the new structured
  *  `summary` field. Falls back to the legacy heard+opportunity pair, then to
- *  the raw body. */
+ *  the raw body.
+ *  @deprecated Use the cleaned `summary` from `parseSentinels` instead. */
 export function summaryForHome(close: OnboardingClose): string | null {
   if (close.summary && close.summary.trim()) return close.summary.trim();
   const parts: string[] = [];
