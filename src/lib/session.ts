@@ -46,12 +46,19 @@ export async function getUser(
   userId: string,
 ): Promise<Pick<
   User,
-  "id" | "name" | "onboarding_complete" | "onboarding_summary" | "onboarding_task"
+  | "id"
+  | "name"
+  | "onboarding_complete"
+  | "onboarding_summary"
+  | "onboarding_task"
+  | "last_session_at"
+  | "session_count"
+  | "streak_days"
 > | null> {
   const { data } = await supabase
     .from("users")
     .select(
-      "id, name, onboarding_complete, onboarding_summary, onboarding_task",
+      "id, name, onboarding_complete, onboarding_summary, onboarding_task, last_session_at, session_count, streak_days",
     )
     .eq("id", userId)
     .maybeSingle();

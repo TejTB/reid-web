@@ -6,11 +6,22 @@ import {
   CHAT_SYSTEM,
 } from "@/lib/anthropic";
 import { supabase } from "@/lib/supabase";
-import { parseOnboardingClose, summaryForHome } from "@/lib/reid-summary";
+import {
+  parseOnboardingClose,
+  summaryForHome,
+  extractName,
+} from "@/lib/reid-summary";
+import {
+  createSession,
+  sessionBelongsTo,
+  appendMessages,
+  endSession,
+} from "@/lib/session-server";
 
 type ReidRequest = {
   userId: string;
   mode: "onboarding" | "chat";
+  sessionId?: string;
   messages: { role: "user" | "assistant"; content: string }[];
 };
 
@@ -22,6 +33,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
   const { userId, mode, messages } = body;
+  let { sessionId } = body;
   if (
     !userId ||
     (mode !== "onboarding" && mode !== "chat") ||
@@ -35,6 +47,18 @@ export async function POST(req: NextRequest) {
     { onConflict: "id", ignoreDuplicates: true },
   );
 
+  // Resolve sessionId: honor client-supplied id only if it exists and
+  // belongs to this user. Otherwise mint a fresh session.
+  if (sessionId) {
+    const ok = await sessionBelongsTo(sessionId, userId);
+    if (!ok) sessionId = undefined;
+  }
+  if (!sessionId) {
+    sessionId = await createSession(userId);
+  }
+
+  // Legacy conversations table: keep writing the user turn so existing
+  // history-loading code (chat page) continues to work during the migration.
   const lastMessage = messages[messages.length - 1];
   if (lastMessage?.role === "user") {
     await supabase
@@ -80,6 +104,7 @@ export async function POST(req: NextRequest) {
   });
 
   const encoder = new TextEncoder();
+  const resolvedSessionId = sessionId;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
@@ -104,8 +129,8 @@ export async function POST(req: NextRequest) {
           const close = parseOnboardingClose(assistantText);
           const cleaned = close.hasSentinel ? close.body : assistantText;
 
-          // Persist conversation without the sentinel — readers (chat history,
-          // future analytics) should never see the control token in the body.
+          // Legacy conversations table: persist the assistant turn (without
+          // sentinel) so existing readers keep working.
           await supabase
             .from("conversations")
             .insert({
@@ -114,19 +139,71 @@ export async function POST(req: NextRequest) {
               content: cleaned,
             });
 
-          // Server-authoritative completion: if Reid emitted the sentinel,
-          // persist the summary + task and flip onboarding_complete here, so
-          // we don't depend on the client surviving the round trip.
+          // New sessions/messages tables: append just this turn's new
+          // messages — the trailing user message (if any) and the
+          // assistant's full reply. We do NOT replay the whole history
+          // on every request.
+          const newTurnMessages: { role: "user" | "assistant"; content: string }[] =
+            [];
+          if (lastMessage?.role === "user") {
+            newTurnMessages.push({
+              role: "user",
+              content: lastMessage.content,
+            });
+          }
+          newTurnMessages.push({
+            role: "assistant",
+            content: cleaned,
+          });
+          await appendMessages(resolvedSessionId, userId, newTurnMessages);
+
+          // Update the session row: bump message_count by the number of
+          // messages we just appended, set ended_at to "now" so the
+          // session timestamp reflects the most recent activity.
+          // bumpUserCounters: only true when onboarding actually closes,
+          // so the user's session_count counts completed sessions, not
+          // individual turns.
           if (mode === "onboarding" && close.hasSentinel) {
-            const summary = summaryForHome(close);
+            const sessionSummary = summaryForHome(close);
+            await endSession(resolvedSessionId, {
+              userId,
+              summary: sessionSummary,
+              taskSet: close.task ?? null,
+              messageCountDelta: newTurnMessages.length,
+              bumpUserCounters: true,
+            });
+
+            // Persist onboarding fields to the user row. Only set `name`
+            // if we can extract one AND the user doesn't already have a
+            // better one stored.
+            const firstUserMessage = messages.find((m) => m.role === "user")
+              ?.content;
+            const extracted = firstUserMessage
+              ? extractName(firstUserMessage)
+              : null;
             const update: {
               onboarding_complete: boolean;
               onboarding_summary?: string | null;
               onboarding_task?: string | null;
+              name?: string;
             } = { onboarding_complete: true };
-            if (summary) update.onboarding_summary = summary;
+            if (sessionSummary) update.onboarding_summary = sessionSummary;
             if (close.task) update.onboarding_task = close.task;
+            if (extracted) {
+              const { data: existing } = await supabase
+                .from("users")
+                .select("name")
+                .eq("id", userId)
+                .maybeSingle();
+              if (!existing?.name) update.name = extracted;
+            }
             await supabase.from("users").update(update).eq("id", userId);
+          } else {
+            await endSession(resolvedSessionId, {
+              userId,
+              messageCountDelta: newTurnMessages.length,
+              bumpUserCounters: false,
+            });
           }
         } catch {
           // Already delivered to the client; persistence is best-effort.
@@ -146,6 +223,7 @@ export async function POST(req: NextRequest) {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "X-Content-Type-Options": "nosniff",
+      "X-Reid-Session-Id": resolvedSessionId,
       "Cache-Control": "no-store",
     },
   });
