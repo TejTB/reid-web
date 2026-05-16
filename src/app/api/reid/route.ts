@@ -241,28 +241,66 @@ class SentinelStripper {
         // attribute closed. Drop up to and including the newline.
         return { leftover: buf.slice(newlineIdx + 1) };
       }
-      // No newline yet -- might still be mid-sentinel. But if the model has
-      // already emitted what looks like a complete sentinel (regex matches
-      // a leading slice of buf) and then some plain text, we can detect
-      // that by trying the regex.
+      // No newline yet -- might still be mid-sentinel. Try the regex but be
+      // careful about optional trailing attributes: a [GOAL_UPDATE] without
+      // a note= clause looks identical to one whose note= clause hasn't
+      // landed yet. We only terminate via regex when the trailing chars
+      // cannot grow into the optional attribute.
       let re: RegExp | null = null;
+      let optionalAttrStart: string | null = null;
       if (this.inSentinel === "[GOAL_UPDATE]") {
         re =
           /^\[GOAL_UPDATE\]\s*goalTitle="[^"]*"\s+delta=-?\d+(?:\.\d+)?\s*(?:note="[^"]*")?/;
+        optionalAttrStart = "note=";
       } else if (this.inSentinel === "[SESSION_COMPLETE]") {
         re = /^\[SESSION_COMPLETE\]\s*summary="[^"]*"\s*(?:task="[^"]*")?/;
+        optionalAttrStart = "task=";
       } else if (this.inSentinel === "[EMAIL_CAPTURED]") {
         re = /^\[EMAIL_CAPTURED\]\s*email="[^"]+"/;
+        optionalAttrStart = null;
       }
       if (re) {
         const m = buf.match(re);
         if (m) {
           const matchedLen = m[0].length;
-          // Only terminate if there's at least one additional char after
-          // the match -- otherwise the model might still extend the
-          // sentinel (e.g. an optional note="..." not yet emitted).
+          // If the regex matched the FULL buf, we can't tell yet whether
+          // there's more (optional attr) coming. Hold.
           if (buf.length > matchedLen) {
-            return { leftover: buf.slice(matchedLen) };
+            const trailing = buf.slice(matchedLen);
+            // If we still have an optional attr that hasn't fired and the
+            // trailing chars could grow into it, hold. The check: trailing
+            // starts with whitespace followed by a (prefix of) the optional
+            // attr name. Examples we must hold: ` `, `  `, ` n`, ` no`,
+            // ` note`, ` note=`, ` note="x` -- the regex above already
+            // matched the FULL optional form when it was complete, so if
+            // we're here with trailing starting with a (prefix of) the
+            // optional name, it's mid-emit.
+            let couldExtend = false;
+            if (optionalAttrStart) {
+              // Check if matched form already includes optional attr; if so
+              // no further extension possible.
+              const matched = m[0];
+              const alreadyHasAttr = matched.includes(optionalAttrStart);
+              if (!alreadyHasAttr) {
+                // trailing must be: (optional whitespace)(prefix of optionalAttrStart)
+                // -- e.g. ` n`, ` no`, ` not`, ` note`, ` note=`, ` note="`,
+                // ` note="value`. We test by stripping leading whitespace
+                // and asking whether the rest is a prefix of the attr name
+                // OR starts with the attr name and an open `"`.
+                const lead = trailing.replace(/^\s*/, "");
+                if (lead.length === 0) {
+                  couldExtend = true;
+                } else if (
+                  optionalAttrStart.startsWith(lead) ||
+                  lead.startsWith(optionalAttrStart)
+                ) {
+                  couldExtend = true;
+                }
+              }
+            }
+            if (!couldExtend) {
+              return { leftover: trailing };
+            }
           }
         }
       }
