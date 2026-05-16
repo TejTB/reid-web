@@ -13,9 +13,12 @@ import type { Message, Session } from "@/types/db";
  *  here for bulk insert. */
 export interface OnboardingGoalInput {
   title: string;
+  description?: string | null;
   target_value: number;
   unit: string;
-  unit_prefix?: string | null;
+  /** true → unit comes before the number (e.g. "£500"); false → after
+   *  (e.g. "5 clients"). Defaults to true server-side if omitted. */
+  unit_prefix?: boolean;
   deadline?: string | null;
   is_primary?: boolean;
 }
@@ -281,9 +284,10 @@ export async function createGoalsFromOnboarding(
     return {
       user_id: userId,
       title: g.title,
+      description: g.description ?? null,
       target_value: g.target_value,
       unit: g.unit,
-      unit_prefix: g.unit_prefix ?? null,
+      unit_prefix: g.unit_prefix ?? true,
       deadline: g.deadline ?? null,
       is_primary: isPrimary,
     };

@@ -159,7 +159,7 @@ export async function getGoals(userId: string): Promise<Goal[]> {
   const { data, error } = await supabase
     .from("goals")
     .select(
-      "id, user_id, title, target_value, current_value, unit, unit_prefix, deadline, is_primary, completed_at, created_at, updated_at",
+      "id, user_id, title, description, target_value, current_value, unit, unit_prefix, deadline, is_primary, completed_at, created_at, updated_at",
     )
     .eq("user_id", userId)
     .order("is_primary", { ascending: false })

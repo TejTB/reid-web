@@ -45,10 +45,11 @@ export interface Goal {
   id: string;
   user_id: string;
   title: string;
+  description: string | null;
   target_value: number;
   current_value: number;
   unit: string;
-  unit_prefix: string | null;
+  unit_prefix: boolean;
   deadline: string | null;
   is_primary: boolean;
   completed_at: string | null;
@@ -79,13 +80,13 @@ export interface PushSubscription {
 export interface Notification {
   id: string;
   user_id: string;
-  type: "nudge" | "review" | "goal_milestone" | "task_reminder";
-  channel: "push" | "in_app";
-  title: string;
-  body: string | null;
+  type:
+    | "task_overdue"
+    | "goal_stagnant"
+    | "goal_near"
+    | "weekly_review"
+    | "goal_complete";
+  channel: "email" | "push" | "in_app";
   payload: unknown;
-  scheduled_for: string | null;
-  sent_at: string | null;
-  read_at: string | null;
-  created_at: string;
+  sent_at: string;
 }

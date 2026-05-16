@@ -15,14 +15,17 @@ alter table public.users
   add column if not exists onboarding_goals jsonb;
 
 -- ----- goals --------------------------------------------------------------
+-- unit_prefix is a boolean: true means the unit comes BEFORE the number
+-- (e.g. "£500"), false means it comes AFTER (e.g. "5 clients").
 create table if not exists public.goals (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
   title text not null,
+  description text,
   target_value numeric not null,
   current_value numeric not null default 0,
   unit text not null,
-  unit_prefix text,
+  unit_prefix boolean not null default true,
   deadline date,
   is_primary boolean not null default false,
   completed_at timestamptz,
@@ -79,18 +82,15 @@ create unique index if not exists push_subscriptions_endpoint_idx on public.push
 create index if not exists push_subscriptions_user_idx on public.push_subscriptions(user_id);
 
 -- ----- notifications ------------------------------------------------------
+-- Post-send log only: a row is written AFTER a notification is delivered.
+-- No scheduling / read-receipt fields — those aren't part of Sprint 5.
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
-  type text not null check (type in ('nudge','review','goal_milestone','task_reminder')),
-  channel text not null check (channel in ('push','in_app')),
-  title text not null,
-  body text,
+  type text not null check (type in ('task_overdue','goal_stagnant','goal_near','weekly_review','goal_complete')),
+  channel text not null check (channel in ('email','push','in_app')),
   payload jsonb,
-  scheduled_for timestamptz,
-  sent_at timestamptz,
-  read_at timestamptz,
-  created_at timestamptz not null default now()
+  sent_at timestamptz not null default now()
 );
 alter table public.notifications enable row level security;
 do $$ begin
@@ -99,8 +99,7 @@ do $$ begin
   end if;
 end $$;
 
-create index if not exists notifications_user_created_idx on public.notifications(user_id, created_at desc);
-create index if not exists notifications_user_scheduled_idx on public.notifications(user_id, scheduled_for) where sent_at is null;
+create index if not exists notifications_user_type_sent_idx on public.notifications(user_id, type, sent_at desc);
 
 -- ----- updated_at trigger on goals ----------------------------------------
 create or replace function public.set_updated_at()
