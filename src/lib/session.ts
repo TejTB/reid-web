@@ -47,6 +47,9 @@ export function clearSession(): void {
   localStorage.removeItem(KEY);
   localStorage.removeItem(ONBOARDED_KEY);
   localStorage.removeItem(CHAT_SESSION_KEY);
+  // Clear the push opt-in "asked" flag so a fresh onboarding can re-prompt
+  // for notifications on the next session-1 / session-2 home visit.
+  localStorage.removeItem("reid:push:asked");
   // Also wipe per-task done flags — leftover flags from the previous session
   // would otherwise resurrect (in /tasks or /home) once a new user reaches a
   // task with the same id under a fresh userId.
