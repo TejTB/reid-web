@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
+import PushOptInBanner from "@/components/PushOptInBanner";
 import { getUserId, getUser } from "@/lib/session";
 import type { User } from "@/types/db";
 
@@ -153,6 +154,13 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-6 md:px-6 pt-[60px] pb-12 flex flex-col">
+      {user && (
+        <PushOptInBanner
+          userId={user.id}
+          name={user.name}
+          sessionCount={sessionCount}
+        />
+      )}
       <div
         className="animate-fade-up"
         style={{ animationDelay: "0ms" }}
