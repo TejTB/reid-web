@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { signOut } from "@/lib/session";
+import { FREE_SESSIONS, signOut } from "@/lib/session";
 import { useMe } from "./AuthProvider";
 
 // Mounted once globally (inside AppShell). Listens for the `reid:open-settings`
@@ -22,6 +22,16 @@ export default function SettingsModal() {
   const status = me?.subscription_status ?? "free";
   const isPro = status === "pro";
   const isPastDue = status === "past_due";
+  // Clamp the free-tier session count to FREE_SESSIONS so the visible number
+  // can never exceed the quota even if the server-side count drifts. Matches
+  // the same logic used in /settings.
+  const rawSessionCount = me?.session_count ?? 0;
+  const usedSessions =
+    rawSessionCount <= 0
+      ? 0
+      : rawSessionCount >= FREE_SESSIONS
+      ? FREE_SESSIONS
+      : rawSessionCount;
   const [open, setOpen] = useState(false);
   // Drives the entrance opacity/translateY transition. We mount when `open`
   // flips true, then flip `visible` next frame so the transition runs.
@@ -182,7 +192,7 @@ export default function SettingsModal() {
                   ? "Reid Pro — unlimited"
                   : isPastDue
                   ? "Payment failed"
-                  : "Free — 20 messages a day"}
+                  : `Free · ${usedSessions} of ${FREE_SESSIONS} sessions used`}
               </span>
               <button
                 type="button"

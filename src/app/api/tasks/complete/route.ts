@@ -8,10 +8,13 @@
 //   1. Mark the task complete on public.users (column
 //      `onboarding_task_completed_at`). The /tasks UI is already optimistic;
 //      this just persists across devices.
-//   2. Ask Reid for a one-sentence acknowledgement and write his response to
-//      the legacy `conversations` table as a system-originated assistant
-//      turn. The /chat page reads that table as its message history fallback,
-//      so the user sees Reid's reply when they tap the toast.
+//   2. Ask Reid for a one-sentence acknowledgement and append it to the
+//      live message store (sessions/messages) on the user's most recent
+//      session — the same table /api/reid writes to and /chat reads from.
+//      We also mirror the assistant turn into the legacy `conversations`
+//      table for parity with /api/reid. If the user has no sessions yet
+//      (no chat or onboarding history), the reply is dropped silently
+//      rather than minting a phantom session.
 //
 // The brief asks for a sibling endpoint rather than extending /api/reid
 // (which is off-limits to Agent 3 in this sprint). The system prompt and
@@ -25,6 +28,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { anthropic, REID_MODEL, buildSystemPrompt } from "@/lib/anthropic";
 import { getAuthedUser } from "@/lib/supabase-auth";
+import { appendMessages } from "@/lib/session-server";
 
 const taskCompleteRequestSchema = z.object({
   taskText: z.string().min(1).max(2000),
@@ -102,17 +106,45 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true, replied: false });
   }
 
-  // Persist as an assistant turn in conversations (the legacy table the chat
-  // page already reads). No session_id — this is a side-channel from /tasks,
-  // not a chat session.
-  const { error: insertError } = await db.from("conversations").insert({
+  // Find the target session for the assistant turn. Prefer the user's most
+  // recently active session (no ended_at); fall back to the most recently
+  // ended one so the reply still surfaces in /chat history when the user
+  // re-enters chat. If neither exists, drop the message silently — minting
+  // a phantom session would muddy session_count and history.
+  const { data: sessionRows } = await db
+    .from("sessions")
+    .select("id, ended_at, started_at")
+    .eq("user_id", userId)
+    .order("started_at", { ascending: false })
+    .limit(5);
+  const sessions = (sessionRows ?? []) as Array<{
+    id: string;
+    ended_at: string | null;
+    started_at: string;
+  }>;
+  const activeSession = sessions.find((s) => s.ended_at === null) ?? null;
+  const targetSession = activeSession ?? sessions[0] ?? null;
+
+  if (!targetSession) {
+    // No session to attach to — keep the 200 so the optimistic UI sticks,
+    // but report `replied: false` so the caller can fall back to its
+    // static toast phrase.
+    return Response.json({ ok: true, replied: false });
+  }
+
+  // Live message store — same table /chat reads from via /api/reid/history.
+  await appendMessages(db, targetSession.id, userId, [
+    { role: "assistant", content: replyText },
+  ]);
+
+  // Mirror to the legacy conversations table for parity with /api/reid,
+  // which still double-writes during the migration. Best-effort: a failure
+  // here doesn't roll back the live-store insert above.
+  await db.from("conversations").insert({
     user_id: userId,
     role: "assistant",
     content: replyText,
   });
-  if (insertError) {
-    return Response.json({ ok: true, replied: false });
-  }
 
   return Response.json({ ok: true, replied: true, reply: replyText });
 }

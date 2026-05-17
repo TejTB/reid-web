@@ -95,11 +95,15 @@ export async function getReidContext(
     .limit(5);
   const recentSessions = (sessionRows ?? []) as Session[];
 
+  // Surface either:
+  //   - legacy [OBSERVATION] sentinel rows (confidence in medium/high), or
+  //   - new /api/observe rows (category set, confidence null)
+  // so Reid sees every diagnostic note regardless of which path wrote it.
   const { data: observationRows } = await db
     .from("observations")
-    .select("id, user_id, session_id, text, confidence, created_at")
+    .select("id, user_id, session_id, text, confidence, category, created_at")
     .eq("user_id", userId)
-    .in("confidence", ["medium", "high"])
+    .or("category.not.is.null,confidence.in.(medium,high)")
     .order("created_at", { ascending: false })
     .limit(8);
   const observations = (observationRows ?? []) as Observation[];
@@ -192,7 +196,11 @@ export async function getReidContext(
   if (observations.length > 0) {
     lines.push("WHAT YOU'VE NOTICED");
     for (const o of observations) {
-      lines.push(`- (${o.confidence}) ${o.text}`);
+      // Prefer the diagnostic category label (new /api/observe rows). Fall
+      // back to confidence for legacy sentinel rows. If neither is present
+      // (shouldn't happen given the filter above), render the bare text.
+      const label = o.category ?? o.confidence ?? null;
+      lines.push(label ? `- (${label}) ${o.text}` : `- ${o.text}`);
     }
     lines.push("");
   }
