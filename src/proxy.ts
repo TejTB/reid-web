@@ -18,6 +18,17 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function proxy(request: NextRequest) {
+  // Native clients authenticate per-request via Authorization: Bearer <jwt>.
+  // The proxy's cookie-based getUser() doesn't see those, so it would 401
+  // every native API call. Route handlers (getAuthedUser) validate the
+  // Bearer token themselves.
+  if (
+    request.nextUrl.pathname.startsWith("/api/") &&
+    request.headers.get("authorization")?.startsWith("Bearer ")
+  ) {
+    return NextResponse.next();
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
