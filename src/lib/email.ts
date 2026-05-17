@@ -275,29 +275,60 @@ export function weeklyReviewEmail(
   return { subject, html };
 }
 
+/** Re-engagement email: plain text, no logo, no HTML chrome. Sent by the
+ *  daily /api/cron/reengage cron when the founder has gone dark for 48h and
+ *  still has an open task on the books. The body is intentionally bare —
+ *  Reid talking, not the platform marketing at them. */
+export function reengageEmail(
+  daysQuiet: number,
+  task: string,
+): { subject: string; text: string } {
+  const subject = "Reid noticed.";
+  const dayLabel = `${daysQuiet} day${daysQuiet === 1 ? "" : "s"}`;
+  const text = `You haven't talked to me in ${dayLabel}.
+
+Last task I gave you: "${task}"
+
+Did you do it?
+
+— Reid
+
+[Open Reid → ${APP_URL}/chat]`;
+  return { subject, text };
+}
+
 // ----- sender -------------------------------------------------------------
 
 /** Sends a single email via Resend. Never throws — returns `false` on any
  *  failure so the cron pipeline can decide whether to retry / log without
- *  losing the rest of the loop. */
+ *  losing the rest of the loop. Accepts either an HTML body or a plain-text
+ *  body; at least one is required. */
 export async function sendEmail(opts: {
   to: string;
   subject: string;
-  html: string;
+  html?: string;
+  text?: string;
 }): Promise<boolean> {
-  const { to, subject, html } = opts;
-  if (!to || !subject || !html) return false;
+  const { to, subject, html, text } = opts;
+  if (!to || !subject) return false;
+  if (!html && !text) return false;
   if (!process.env.RESEND_API_KEY) {
     console.error("[email] RESEND_API_KEY not set, skipping send");
     return false;
   }
   try {
-    const result = await resend.emails.send({
-      from: FROM,
-      to,
-      subject,
-      html,
-    });
+    const payload: {
+      from: string;
+      to: string;
+      subject: string;
+      html?: string;
+      text?: string;
+    } = { from: FROM, to, subject };
+    if (html) payload.html = html;
+    if (text) payload.text = text;
+    const result = await resend.emails.send(
+      payload as Parameters<typeof resend.emails.send>[0],
+    );
     if (result.error) {
       console.error("[email] resend error:", result.error);
       return false;

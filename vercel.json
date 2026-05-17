@@ -1,5 +1,6 @@
 {
   "crons": [
-    { "path": "/api/notifications/trigger", "schedule": "13 9 * * *" }
+    { "path": "/api/notifications/trigger", "schedule": "13 9 * * *" },
+    { "path": "/api/cron/reengage", "schedule": "0 9 * * *" }
   ]
 }

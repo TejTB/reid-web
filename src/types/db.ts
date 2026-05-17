@@ -20,6 +20,8 @@ export interface User {
   subscription_id: string | null;
   subscribed_at: string | null;
   subscription_period_end: string | null;
+  last_reengage_email_at: string | null;
+  onboarding_task_completed_at: string | null;
 }
 
 export interface Conversation {
@@ -101,11 +103,21 @@ export interface Notification {
 
 export type ObservationConfidence = "low" | "medium" | "high";
 
+export type ObservationCategory =
+  | "avoidance"
+  | "pattern"
+  | "contradiction"
+  | "strength";
+
 export interface Observation {
   id: string;
   user_id: string;
   session_id: string | null;
   text: string;
-  confidence: ObservationConfidence;
+  /** Legacy field used by [OBSERVATION] sentinel rows from /api/reid. New
+   *  rows written by /api/observe omit this in favour of `category`. */
+  confidence: ObservationConfidence | null;
+  /** Diagnostic label set by /api/observe. Null on legacy rows. */
+  category: ObservationCategory | null;
   created_at: string;
 }

@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, CheckCircle } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
+import { supabase } from "@/lib/supabase";
 
 const MONTHS_SHORT = [
   "Jan",
@@ -39,13 +40,18 @@ type Task = {
   assignedDate: string;
 };
 
+const TOAST_DURATION_MS = 6000;
+
 export default function TasksPage() {
   const router = useRouter();
   const { me, loading: authLoading } = useAuth();
   const userId = me?.id ?? null;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [doneMap, setDoneMap] = useState<Record<number, boolean>>({});
+  const [pendingMap, setPendingMap] = useState<Record<number, boolean>>({});
   const [loaded, setLoaded] = useState(false);
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const error = false;
 
   useEffect(() => {
@@ -69,14 +75,22 @@ export default function TasksPage() {
       }
 
       const map: Record<number, boolean> = {};
-      try {
-        for (const t of collected) {
-          map[t.index] =
-            localStorage.getItem(`reid:task:${me.id}:${t.index}:done`) ===
-            "true";
+      // Server completion takes precedence over the local flag — the user
+      // may have ticked from another device.
+      const serverDone = !!me.onboarding_task_completed_at;
+      for (const t of collected) {
+        if (t.index === 0) {
+          map[t.index] = serverDone;
         }
-      } catch {
-        // localStorage unavailable — assume all undone.
+        try {
+          if (!map[t.index]) {
+            map[t.index] =
+              localStorage.getItem(`reid:task:${me.id}:${t.index}:done`) ===
+              "true";
+          }
+        } catch {
+          // localStorage unavailable — assume current map value.
+        }
       }
 
       if (cancelled) return;
@@ -89,20 +103,71 @@ export default function TasksPage() {
     };
   }, [authLoading, me, router]);
 
-  function toggle(taskIndex: number) {
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  function showToast() {
+    setToastVisible(true);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => {
+      setToastVisible(false);
+      toastTimer.current = null;
+    }, TOAST_DURATION_MS);
+  }
+
+  async function complete(task: Task) {
     if (!userId) return;
-    setDoneMap((prev) => {
-      const next = { ...prev, [taskIndex]: !prev[taskIndex] };
-      try {
-        localStorage.setItem(
-          `reid:task:${userId}:${taskIndex}:done`,
-          next[taskIndex] ? "true" : "false",
-        );
-      } catch {
-        // ignore
-      }
+    if (doneMap[task.index]) return;
+    if (pendingMap[task.index]) return;
+
+    // Optimistic UI — fill the circle and strike the text immediately.
+    setDoneMap((prev) => ({ ...prev, [task.index]: true }));
+    setPendingMap((prev) => ({ ...prev, [task.index]: true }));
+    try {
+      localStorage.setItem(`reid:task:${userId}:${task.index}:done`, "true");
+    } catch {
+      // localStorage unavailable; the in-memory map still reflects done.
+    }
+
+    let session = null;
+    try {
+      const {
+        data: { session: s },
+      } = await supabase.auth.getSession();
+      session = s;
+    } catch {
+      session = null;
+    }
+
+    let success = false;
+    try {
+      const res = await fetch("/api/tasks/complete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({ taskText: task.text }),
+      });
+      success = res.ok;
+    } catch {
+      success = false;
+    }
+
+    setPendingMap((prev) => {
+      const next = { ...prev };
+      delete next[task.index];
       return next;
     });
+
+    if (success) {
+      showToast();
+    }
   }
 
   const doneCount = tasks.reduce(
@@ -231,7 +296,6 @@ export default function TasksPage() {
                       borderRadius: 12,
                       padding: "18px 22px",
                       gap: 16,
-                      transition: "all 200ms ease",
                     }}
                   >
                     <button
@@ -239,9 +303,10 @@ export default function TasksPage() {
                       role="checkbox"
                       aria-checked={done}
                       aria-label={
-                        done ? "Mark task incomplete" : "Mark task complete"
+                        done ? "Task complete" : "Mark task complete"
                       }
-                      onClick={() => toggle(t.index)}
+                      onClick={() => complete(t)}
+                      disabled={done}
                       className="shrink-0 flex items-center justify-center"
                       style={{
                         width: 22,
@@ -251,8 +316,9 @@ export default function TasksPage() {
                           ? "1.5px solid transparent"
                           : "1.5px solid rgba(255,255,255,0.2)",
                         background: done ? "#B91C1C" : "transparent",
-                        cursor: "pointer",
-                        transition: "all 200ms ease",
+                        cursor: done ? "default" : "pointer",
+                        transition:
+                          "background-color 200ms ease-out, border-color 200ms ease-out, opacity 200ms ease-out",
                         marginTop: 2,
                       }}
                     >
@@ -265,10 +331,11 @@ export default function TasksPage() {
                         className="font-sans whitespace-pre-wrap [text-wrap:pretty]"
                         style={{
                           fontSize: 15,
-                          color: done ? "#7A90A8" : "#F2EDE3",
+                          color: "#F2EDE3",
                           textDecoration: done ? "line-through" : "none",
+                          opacity: done ? 0.6 : 1,
                           transition:
-                            "color 300ms ease, text-decoration-color 300ms ease",
+                            "opacity 200ms ease-out, text-decoration-color 200ms ease-out",
                           lineHeight: 1.55,
                         }}
                       >
@@ -294,6 +361,42 @@ export default function TasksPage() {
           </ul>
         )}
       </div>
+
+      {/* Toast: Reid responded. Bottom-right slide-in, surface bg, 6s
+          auto-dismiss. Click navigates to /chat. */}
+      <button
+        type="button"
+        onClick={() => {
+          setToastVisible(false);
+          router.push("/chat");
+        }}
+        aria-label="Open chat with Reid"
+        style={{
+          position: "fixed",
+          right: 24,
+          bottom: 24,
+          padding: "12px 16px",
+          background: "#0F1E35",
+          border: "1px solid rgba(255,255,255,0.07)",
+          borderRadius: 12,
+          color: "#F2EDE3",
+          fontFamily: "var(--font-sans), sans-serif",
+          fontSize: 14,
+          letterSpacing: "0.01em",
+          cursor: "pointer",
+          opacity: toastVisible ? 1 : 0,
+          transform: toastVisible
+            ? "translateX(0)"
+            : "translateX(calc(100% + 32px))",
+          transition:
+            "transform 220ms ease-out, opacity 220ms ease-out",
+          pointerEvents: toastVisible ? "auto" : "none",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+          zIndex: 60,
+        }}
+      >
+        Reid responded →
+      </button>
     </div>
   );
 }
