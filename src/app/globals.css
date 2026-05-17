@@ -281,3 +281,28 @@ body {
   0%, 100% { transform: scaleY(0.3); }
   50% { transform: scaleY(1); }
 }
+
+/* VoiceButton/Waveform: bars rise from 4px to 16px on alternating loop.
+   Height animation is acceptable here — bars are 3px wide so the per-frame
+   layout cost is negligible, and `height` is the right primitive for an
+   audio-level visual. Do not use height-animation elsewhere. */
+@keyframes reid-waveform-bar {
+  from { height: 4px; }
+  to   { height: 16px; }
+}
+
+/* VoiceButton: hover lift + mobile sizing override. Inline styles handle the
+   default colour/radius/spec; the rules below only add hover + breakpoint
+   adjustments that are awkward to express inline. The idle pill darkens to
+   #991818 on hover; the active (ghost) pill keeps its translucent fill but
+   still lifts. */
+.reid-voice-pill:not(:disabled):hover { transform: scale(1.02); }
+.reid-voice-pill[data-state="idle"]:not(:disabled):hover {
+  background: #991818 !important;
+}
+@media (max-width: 640px) {
+  .reid-voice-pill {
+    font-size: 11px !important;
+    padding: 5px 12px !important;
+  }
+}

@@ -1,10 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Volume2 } from "lucide-react";
 import ChatStream from "@/components/ChatStream";
 import ChatInput from "@/components/ChatInput";
 import LogoMark from "@/components/LogoMark";
+import VoiceButton from "@/components/VoiceButton";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
 import { streamReid, DailyLimitError } from "@/lib/reid";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
@@ -24,11 +24,6 @@ export default function ChatPage() {
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [waveformActive, setWaveformActive] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
   // Reserved for future bootstrap-failure UI; auth/me load lives in
   // AuthProvider now, so the chat page itself has no early-failure surface.
   const bootstrapError = false;
@@ -114,80 +109,6 @@ export default function ChatPage() {
     [],
   );
 
-  const playMessage = useCallback(async (text: string) => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
-    setIsPlaying(true);
-    setWaveformActive(true);
-    try {
-      const res = await fetch("/api/voice", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (res.status === 403) {
-        setVoiceEnabled(false);
-        setIsPlaying(false);
-        setWaveformActive(false);
-        return;
-      }
-      if (!res.ok) {
-        setIsPlaying(false);
-        setWaveformActive(false);
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      audioUrlRef.current = url;
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.addEventListener("ended", () => {
-        setIsPlaying(false);
-        setWaveformActive(false);
-        URL.revokeObjectURL(url);
-        audioUrlRef.current = null;
-        audioRef.current = null;
-      });
-      audio.addEventListener("error", () => {
-        setIsPlaying(false);
-        setWaveformActive(false);
-        URL.revokeObjectURL(url);
-        audioUrlRef.current = null;
-        audioRef.current = null;
-      });
-      await audio.play();
-    } catch {
-      setIsPlaying(false);
-      setWaveformActive(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!voiceEnabled || isStreaming || messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    if (last.role !== "assistant") return;
-    void playMessage(last.content);
-  }, [messages, isStreaming, voiceEnabled, playMessage]);
-
-  useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-      if (audioUrlRef.current) {
-        URL.revokeObjectURL(audioUrlRef.current);
-        audioUrlRef.current = null;
-      }
-    };
-  }, []);
-
   useEffect(() => {
     if (authLoading) return;
     if (initialized.current) return;
@@ -270,6 +191,16 @@ export default function ChatPage() {
   const subtitle = lastSessionAt
     ? `Last session: ${formatLastSession(lastSessionAt)}`
     : "First session.";
+
+  // VoiceButton needs the latest finalised Reid message (not the in-flight
+  // streamingText, which would re-trigger TTS on every chunk for Pro users).
+  // Falls back to "" so the button renders disabled until Reid speaks.
+  const latestReidMessage = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant") return messages[i].content;
+    }
+    return "";
+  })();
 
   const emptyState = (
     <div className="flex flex-col items-center text-center px-6">
@@ -370,50 +301,11 @@ export default function ChatPage() {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {waveformActive && (
-            <div className="flex items-center gap-[2px] h-4">
-              {[0, 1, 2, 3, 4].map((i) => (
-                <div
-                  key={i}
-                  className="w-[2px] rounded-full"
-                  style={{
-                    height: "100%",
-                    backgroundColor: "#B91C1C",
-                    animation: `waveform 0.8s ease-in-out infinite`,
-                    animationDelay: `${i * 0.1}s`,
-                    transformOrigin: "bottom",
-                  }}
-                />
-              ))}
-            </div>
-          )}
-          <button
-            type="button"
-            aria-label={voiceEnabled ? "Disable voice" : "Enable voice"}
-            onClick={() => {
-              if (!isPro) {
-                window.dispatchEvent(new CustomEvent("reid:open-paywall"));
-                return;
-              }
-              setVoiceEnabled((v) => !v);
-            }}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-              display: "flex",
-              alignItems: "center",
-              color: voiceEnabled ? "#B91C1C" : "#7A90A8",
-              backgroundColor: voiceEnabled
-                ? "rgba(185,28,28,0.1)"
-                : "transparent",
-              borderRadius: "6px",
-              transition: "color 150ms ease, background-color 150ms ease",
-            }}
-          >
-            <Volume2 size={16} />
-          </button>
+          <VoiceButton
+            latestReidMessage={latestReidMessage}
+            isPro={isPro}
+            isStreaming={isStreaming}
+          />
         </div>
       </header>
       {bootstrapError ? (
