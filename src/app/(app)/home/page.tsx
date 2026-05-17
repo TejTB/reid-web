@@ -7,6 +7,7 @@ import GlassCard from "@/components/GlassCard";
 import PushOptInBanner from "@/components/PushOptInBanner";
 import ObservationsCard from "@/components/ObservationsCard";
 import { useAuth } from "@/components/AuthProvider";
+import { FREE_SESSIONS } from "@/lib/session";
 import type { User } from "@/types/db";
 
 function greeting() {
@@ -29,12 +30,13 @@ type LoadedUser = Pick<
 >;
 
 // Bucketed milestone copy for the momentum bar — the visual bar caps at 100%
-// but the label keeps progressing past 10 sessions.
+// when the user reaches FREE_SESSIONS; pro users continue to see milestone
+// labels progress past that.
 function milestoneFor(sessionCount: number): string {
-  if (sessionCount <= 2) return "Getting started";
-  if (sessionCount <= 4) return "Building momentum";
-  if (sessionCount <= 9) return "Pattern emerging";
-  return "First checkpoint";
+  if (sessionCount <= 1) return "Getting started";
+  if (sessionCount < FREE_SESSIONS) return "Building momentum";
+  if (sessionCount === FREE_SESSIONS) return "First checkpoint";
+  return "Pattern emerging";
 }
 
 // "Active today" / "{n} day streak" / "Last active {n} days ago".
@@ -149,7 +151,7 @@ export default function HomePage() {
   const sessionCount = user?.session_count ?? 0;
   const streakText = user ? streakTextFor(user) : null;
   const milestoneLabel = milestoneFor(sessionCount);
-  const progressPct = Math.min(100, (sessionCount / 10) * 100);
+  const progressPct = Math.min(100, (sessionCount / FREE_SESSIONS) * 100);
 
   function toggleTask() {
     if (!user) return;
@@ -226,8 +228,9 @@ export default function HomePage() {
                 Complete your first session with Reid.
               </p>
             )}
-            {/* Momentum bar — caps visually at 100%, milestone label keeps
-                progressing for sessions ≥ 10. */}
+            {/* Momentum bar — caps visually at 100% when sessionCount hits
+                FREE_SESSIONS; milestone label keeps progressing past that
+                for Pro users. */}
             <div className="mt-4">
               <div className="h-1 bg-white/5 rounded-full overflow-hidden">
                 <div
@@ -236,7 +239,7 @@ export default function HomePage() {
                 />
               </div>
               <p className="mt-2 text-xs text-text-dim font-sans">
-                Session {sessionCount} of 10 — {milestoneLabel}
+                Session {sessionCount} of {FREE_SESSIONS} — {milestoneLabel}
               </p>
             </div>
           </GlassCard>

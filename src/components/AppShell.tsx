@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Eye,
   Home,
@@ -25,16 +25,19 @@ const NAV = [
   { href: "/tasks", label: "Tasks", icon: ListTodo },
 ] as const;
 
-function openSettings() {
-  // Agent 3 will mount a listener that opens the settings modal.
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent("reid:open-settings"));
-}
-
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const me = useMe();
   const [settingsHovered, setSettingsHovered] = useState(false);
+
+  // The gear button now routes to the full /settings page. We keep the
+  // SettingsModal mounted below because other surfaces (e.g. PaywallModal
+  // recovery flows) still dispatch `reid:open-settings`; that path is
+  // unaffected by this change.
+  function openSettings() {
+    router.push("/settings");
+  }
 
   const name =
     me?.name?.trim() ||

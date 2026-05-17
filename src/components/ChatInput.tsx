@@ -2,6 +2,17 @@
 import { ArrowUp } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+// Design tokens for the focus ring. Kept here as constants because they only
+// apply to this component and are derived from the design system:
+//   BORDER_IDLE / BORDER_FOCUS  — neutral white wrapper border (no red).
+//   FOCUS_RING                  — single red box-shadow ring on the textarea.
+// This deliberately bypasses the global `.input-bar:focus-within` rule (which
+// painted the wrapper red), so the user sees ONE red ring on the textarea
+// and a subtle neutral wrapper border — never both at once.
+const WRAPPER_BORDER_IDLE = "1px solid rgba(255,255,255,0.07)";
+const WRAPPER_BORDER_FOCUS = "1px solid rgba(255,255,255,0.14)";
+const TEXTAREA_FOCUS_RING = "0 0 0 1px rgba(185,28,28,0.5)";
+
 export default function ChatInput({
   onSubmit,
   disabled,
@@ -15,6 +26,7 @@ export default function ChatInput({
   autofocus?: boolean;
 }) {
   const [value, setValue] = useState("");
+  const [wrapperFocused, setWrapperFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canSend = !!value.trim() && !disabled;
 
@@ -57,11 +69,27 @@ export default function ChatInput({
         padding: "16px 24px 32px",
       }}
     >
-      <div className="input-bar flex items-end gap-3 px-5 py-4 mx-auto max-w-[720px]">
+      {/* Wrapper: subtle neutral border that lifts on focus-within. We
+          intentionally do NOT use the global `.input-bar` class here because
+          its `:focus-within` rule paints the border red, which clashed with
+          the textarea's focus ring (two red borders at once). */}
+      <div
+        className="flex items-end gap-3 px-5 py-4 mx-auto max-w-[720px]"
+        style={{
+          background: "rgba(255,255,255,0.05)",
+          border: wrapperFocused ? WRAPPER_BORDER_FOCUS : WRAPPER_BORDER_IDLE,
+          borderRadius: 14,
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          transition: "border-color 200ms ease",
+        }}
+      >
         <textarea
           ref={textareaRef}
           rows={1}
           value={value}
+          onFocus={() => setWrapperFocused(true)}
+          onBlur={() => setWrapperFocused(false)}
           onChange={(e) => {
             setValue(e.target.value);
             autoresize(e.currentTarget);
@@ -73,7 +101,16 @@ export default function ChatInput({
             }
           }}
           placeholder="Say something..."
-          className="flex-1 resize-none bg-transparent outline-none text-text-primary placeholder:text-text-dim text-[15px] leading-relaxed max-h-[180px]"
+          className="flex-1 resize-none bg-transparent text-text-primary placeholder:text-text-dim text-[15px] leading-relaxed max-h-[180px]"
+          style={{
+            // Suppress the global `:focus-visible` outline (globals.css line ~51)
+            // — we replace it with a single red ring below so we never stack
+            // outline + box-shadow.
+            outline: "none",
+            boxShadow: wrapperFocused ? TEXTAREA_FOCUS_RING : "none",
+            borderRadius: 6,
+            transition: "box-shadow 200ms ease",
+          }}
         />
         <button
           type="button"

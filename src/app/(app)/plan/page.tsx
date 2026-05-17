@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Lock } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
-import { getMySessions } from "@/lib/session";
+import { FREE_SESSIONS, getMySessions } from "@/lib/session";
 import type { Session, User } from "@/types/db";
 
 const MONTHS_SHORT = [
@@ -45,6 +46,13 @@ function formatNodeDate(
   return `${MONTHS_SHORT[then.getMonth()]} ${then.getDate()}`;
 }
 
+// Active-session detection: a row is the "active" one if its `ended_at` is
+// null. Only the most-recent such row counts (defensive — there should be at
+// most one open session per user under the current write path).
+function isSessionActive(s: Session): boolean {
+  return s.ended_at === null;
+}
+
 type TimelineRow =
   | {
       kind: "starting";
@@ -56,10 +64,15 @@ type TimelineRow =
       kind: "session";
       label: string;
       date: string;
-      summary: string | null;
+      summary: string;
     }
   | {
-      kind: "progress";
+      kind: "active";
+      label: string;
+      date: string;
+    }
+  | {
+      kind: "locked";
       label: string;
     };
 
@@ -99,18 +112,18 @@ export default function PlanPage() {
 
   // Build the rendered rows: oldest first.
   //
-  // - First row is always STARTING POINT, sourced from users.onboarding_summary.
-  //   That row sits BEFORE the first chat session in the timeline (onboarding
-  //   precedes session 1 in the user-facing count).
-  // - Each subsequent session row is labelled SESSION 2, SESSION 3, … —
-  //   STARTING POINT counts as Session 1 in the user-facing numbering.
-  // - Last row is always IN PROGRESS with the pulsing dot.
-  //
-  // If onboarding_summary is null/empty (incomplete onboarding — should not
-  // happen because /home redirects, but handle defensively), render only the
-  // IN PROGRESS row.
+  // - First row is always STARTING POINT (the onboarding summary). It counts
+  //   as user-facing "Session 1" so chat sessions are labelled SESSION 2…
+  // - Each completed chat session (ended_at IS NOT NULL) renders its summary.
+  // - The single active chat session (ended_at IS NULL, if any) shows the
+  //   pulsing red dot and "Active now". Only ONE row can be active.
+  // - For free users, dim "Not yet" rows with a lock icon fill the remaining
+  //   slots up to FREE_SESSIONS chat sessions, showing the user the rest of
+  //   the road. Pro users see no locks — their roadmap is unbounded.
   const rows: TimelineRow[] = [];
   const onboardingSummary = user?.onboarding_summary?.trim() ?? "";
+  const isPro = user?.subscription_status === "pro";
+
   if (onboardingSummary) {
     rows.push({
       kind: "starting",
@@ -118,18 +131,34 @@ export default function PlanPage() {
       date: formatNodeDate(user?.created_at),
       summary: onboardingSummary,
     });
-    // Reverse to oldest-first.
+
+    // `sessions` arrives newest-first; reverse to oldest-first.
     const oldestFirst = [...sessions].reverse();
+    let actualSessionCount = 0;
     oldestFirst.forEach((s, i) => {
-      rows.push({
-        kind: "session",
-        label: `SESSION ${i + 2}`,
-        date: formatNodeDate(s.started_at),
-        summary: s.summary?.trim() || null,
-      });
+      const label = `SESSION ${i + 2}`;
+      if (isSessionActive(s)) {
+        rows.push({ kind: "active", label, date: formatNodeDate(s.started_at) });
+      } else {
+        rows.push({
+          kind: "session",
+          label,
+          date: formatNodeDate(s.started_at),
+          summary: s.summary?.trim() || "Session ended without a summary.",
+        });
+      }
+      actualSessionCount += 1;
     });
+
+    // Free-tier roadmap: pad with locked rows up to FREE_SESSIONS chat sessions.
+    if (!isPro) {
+      const remaining = Math.max(0, FREE_SESSIONS - actualSessionCount);
+      for (let k = 0; k < remaining; k += 1) {
+        const label = `SESSION ${actualSessionCount + 2 + k}`;
+        rows.push({ kind: "locked", label });
+      }
+    }
   }
-  rows.push({ kind: "progress", label: "IN PROGRESS" });
 
   return (
     <div
@@ -187,7 +216,7 @@ export default function PlanPage() {
       ) : (
         <div className="relative">
           {/* Vertical dim-red line connecting all dots — stops 6px before the
-              last (IN PROGRESS) dot so the timeline visibly terminates. */}
+              last dot so the timeline visibly terminates. */}
           {rows.length > 1 && (
             <div
               aria-hidden
@@ -195,9 +224,6 @@ export default function PlanPage() {
               style={{
                 left: 5.5,
                 top: 10,
-                // Each row is ~80px tall avg; the line should reach the last
-                // dot's centre. Stretch bottom:0 and let the last dot sit on
-                // top — visually clean enough.
                 bottom: 10,
                 width: 1,
                 background: "rgba(185,28,28,0.18)",
@@ -241,63 +267,75 @@ export default function PlanPage() {
                     delay={delay}
                     dot={<SolidDot />}
                   >
-                    {row.summary ? (
-                      <p
-                        className="font-serif italic whitespace-pre-wrap [text-wrap:pretty]"
-                        style={{
-                          fontSize: 18,
-                          color: "#F2EDE3",
-                          marginTop: 6,
-                          lineHeight: 1.45,
-                        }}
-                      >
-                        {row.summary}
-                      </p>
-                    ) : (
-                      <p
-                        className="font-sans italic"
-                        style={{
-                          fontSize: 14,
-                          color: "#7A90A8",
-                          marginTop: 6,
-                          lineHeight: 1.6,
-                        }}
-                      >
-                        Session in progress
-                      </p>
-                    )}
+                    <p
+                      className="font-serif italic whitespace-pre-wrap [text-wrap:pretty]"
+                      style={{
+                        fontSize: 18,
+                        color: "#F2EDE3",
+                        marginTop: 6,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {row.summary}
+                    </p>
                   </TimelineNode>
                 );
               }
-              // IN PROGRESS — pulsing red dot, italic Playfair second line.
+              if (row.kind === "active") {
+                return (
+                  <TimelineNode
+                    key={`active-${i}`}
+                    label={row.label}
+                    date={row.date}
+                    delay={delay}
+                    dot={<PulsingDot />}
+                  >
+                    <p
+                      className="font-sans [text-wrap:pretty]"
+                      style={{
+                        fontSize: 14,
+                        color: "#C8D5E3",
+                        marginTop: 6,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      Active now
+                    </p>
+                    <p
+                      className="font-serif italic [text-wrap:pretty]"
+                      style={{
+                        fontSize: 16,
+                        color: "#7A90A8",
+                        marginTop: 4,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      Reid is building this with you.
+                    </p>
+                  </TimelineNode>
+                );
+              }
+              // locked — dim, lock icon, "Not yet".
               return (
                 <TimelineNode
-                  key={`progress-${i}`}
+                  key={`locked-${i}`}
                   label={row.label}
                   delay={delay}
-                  dot={<PulsingDot />}
+                  dot={<LockedDot />}
+                  dim
                 >
                   <p
-                    className="font-sans [text-wrap:pretty]"
+                    className="font-sans flex items-center"
                     style={{
-                      fontSize: 14,
-                      color: "#C8D5E3",
+                      fontSize: 13,
+                      color: "rgba(242,237,227,0.35)",
                       marginTop: 6,
                       lineHeight: 1.6,
+                      gap: 6,
                     }}
                   >
-                    Reid is building this with you.
-                  </p>
-                  <p
-                    className="font-serif italic [text-wrap:pretty]"
-                    style={{
-                      fontSize: 16,
-                      color: "#7A90A8",
-                      marginTop: 4,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    Keep showing up.
+                    <Lock size={12} strokeWidth={1.8} aria-hidden />
+                    <span>Not yet</span>
                   </p>
                 </TimelineNode>
               );
@@ -342,23 +380,45 @@ function PulsingDot() {
   );
 }
 
+function LockedDot() {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 12,
+        height: 12,
+        borderRadius: "50%",
+        background: "transparent",
+        border: "1px solid rgba(255,255,255,0.14)",
+        display: "block",
+      }}
+    />
+  );
+}
+
 function TimelineNode({
   label,
   date,
   dot,
   children,
   delay,
+  dim,
 }: {
   label: string;
   date?: string;
   dot: React.ReactNode;
   children: React.ReactNode;
   delay: string;
+  dim?: boolean;
 }) {
   return (
     <div
       className="flex items-start animate-fade-up"
-      style={{ gap: 20, animationDelay: delay }}
+      style={{
+        gap: 20,
+        animationDelay: delay,
+        opacity: dim ? 0.55 : 1,
+      }}
     >
       <div
         className="shrink-0 relative"

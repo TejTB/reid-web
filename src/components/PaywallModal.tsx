@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { FREE_SESSIONS } from "@/lib/session";
 import { PLAN_ANNUAL, PLAN_MONTHLY, type PlanInterval } from "@/lib/stripe-public";
 
 // Globally mounted modal that opens when anything dispatches the
@@ -119,18 +120,18 @@ export default function PaywallModal() {
             letterSpacing: "-0.02em",
           }}
         >
-          You&apos;re out for today.
+          That&apos;s your {FREE_SESSIONS} sessions. You&apos;ve had a start.
         </h2>
         <p
-          className="font-sans"
+          className="font-serif italic"
           style={{
-            fontSize: 14,
-            color: "#7A90A8",
+            fontSize: 15,
+            color: "#C8D5E3",
             marginBottom: 24,
-            lineHeight: 1.6,
+            lineHeight: 1.55,
           }}
         >
-          Pro unlocks unlimited sessions with Reid. Cancel anytime.
+          Reid Pro removes the limit — and I remember everything.
         </p>
 
         <div className="flex flex-col" style={{ gap: 10 }}>
