@@ -57,6 +57,45 @@ function isAuthorized(req: NextRequest): boolean {
   return req.headers.get("x-vercel-cron") !== null;
 }
 
+async function sendExpoPushes(
+  db: SupabaseClient,
+  userId: string,
+  daysSince: number,
+): Promise<void> {
+  const { data: subs, error } = await db
+    .from("push_subscriptions")
+    .select("endpoint")
+    .eq("user_id", userId)
+    .eq("platform", "expo");
+  if (error || !subs || subs.length === 0) return;
+
+  for (const sub of subs as { endpoint: string }[]) {
+    if (!sub.endpoint) continue;
+    try {
+      const pushResponse = await fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Accept-Encoding": "gzip, deflate",
+        },
+        body: JSON.stringify({
+          to: sub.endpoint,
+          title: "Reid.",
+          body: `You haven't talked to me in ${daysSince} days. We need to fix that.`,
+          sound: "default",
+          data: { screen: "chat" },
+        }),
+      });
+      if (!pushResponse.ok) {
+        console.error("[reengage push]", await pushResponse.text());
+      }
+    } catch (err) {
+      console.error("[reengage push] failed", err);
+    }
+  }
+}
+
 async function handleOne(
   db: SupabaseClient,
   user: ReengageUser,
@@ -84,6 +123,9 @@ async function handleOne(
   const { subject, text } = reengageEmail(daysQuiet, user.onboarding_task);
   const sent = await sendEmail({ to: user.email, subject, text });
   if (!sent) return "skipped";
+
+  // Native Expo push: best-effort, never blocks email outcome.
+  await sendExpoPushes(db, user.id, daysQuiet);
 
   await db
     .from("users")

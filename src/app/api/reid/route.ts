@@ -18,7 +18,6 @@ import {
 } from "@/lib/session-server";
 import { reidRequestSchema } from "@/lib/validation";
 import { checkDailyMessageLimit } from "@/lib/ratelimit";
-import { supabaseAdmin } from "@/lib/supabase-admin";
 
 // ----- SentinelStripper ---------------------------------------------------
 //
@@ -341,14 +340,6 @@ class SentinelStripper {
 // ----- POST handler -------------------------------------------------------
 
 export async function POST(req: NextRequest) {
-  // DIAGNOSTIC — temporary, remove once native 401 is resolved.
-  console.log('[reid-api] incoming request');
-  const authHeader = req.headers.get('authorization');
-  console.log('[reid-api] auth header:', authHeader?.substring(0, 30));
-  const { data: { user: probeUser }, error: probeError } =
-    await supabaseAdmin().auth.getUser(authHeader?.replace('Bearer ', ''));
-  console.log('[reid-api] user:', probeUser?.id, 'error:', probeError?.message);
-
   const authed = await getAuthedUser(req);
   if (!authed) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
