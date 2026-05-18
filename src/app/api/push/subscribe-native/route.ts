@@ -1,7 +1,13 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+
+const Body = z.object({
+  expoPushToken: z.string().min(10).max(2000),
+  platform: z.enum(["ios", "android"]).optional(),
+});
 
 export async function POST(req: NextRequest) {
   const authed = await getAuthedUser(req);
@@ -15,13 +21,11 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid json" }, { status: 400 });
   }
-  const expoPushToken =
-    body && typeof body === "object" && "expoPushToken" in body
-      ? (body as { expoPushToken: unknown }).expoPushToken
-      : null;
-  if (!expoPushToken || typeof expoPushToken !== "string") {
-    return NextResponse.json({ error: "Missing token" }, { status: 400 });
+  const parsed = Body.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const { expoPushToken } = parsed.data;
 
   const admin = supabaseAdmin();
   const { data: appUser } = await admin

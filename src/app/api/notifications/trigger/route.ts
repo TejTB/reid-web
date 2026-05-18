@@ -28,6 +28,7 @@ import {
   type WeeklyReviewSummary,
 } from "@/lib/email";
 import { sendPushToUser } from "@/lib/push";
+import { safeEqual } from "@/lib/timing-safe";
 import type { Goal, GoalEvent, Notification, User } from "@/types/db";
 
 const HOURS = 60 * 60 * 1000;
@@ -279,7 +280,7 @@ async function handleWeeklyReview(
 export async function POST(req: NextRequest) {
   try {
     const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    if (!safeEqual(auth, `Bearer ${process.env.CRON_SECRET ?? ""}`)) {
       return Response.json({ error: "unauthorized" }, { status: 401 });
     }
 

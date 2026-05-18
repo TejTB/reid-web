@@ -178,8 +178,9 @@ export async function POST(req: NextRequest) {
     rawText = textBlock.text;
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
+    console.error("[api/observe] anthropic failed:", message);
     return Response.json(
-      { error: "anthropic_failed", detail: message },
+      { error: "service_unavailable" },
       { status: 502 },
     );
   }

@@ -26,6 +26,7 @@ import type { NextRequest } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { reengageEmail, sendEmail } from "@/lib/email";
+import { safeEqual } from "@/lib/timing-safe";
 
 const HOUR_MS = 60 * 60 * 1000;
 const QUIET_HOURS = 48;
@@ -51,7 +52,7 @@ function isAuthorized(req: NextRequest): boolean {
   const expected = process.env.CRON_SECRET;
   if (expected) {
     const auth = req.headers.get("authorization");
-    return auth === `Bearer ${expected}`;
+    return safeEqual(auth, `Bearer ${expected}`);
   }
   // Fall-back: Vercel always sets x-vercel-cron on cron-originated GETs.
   return req.headers.get("x-vercel-cron") !== null;
