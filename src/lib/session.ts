@@ -1,13 +1,14 @@
 "use client";
 import { supabase } from "./supabase";
+import { FREE_SESSIONS } from "./session-shared";
 import type { Goal, GoalEvent, Session, User } from "@/types/db";
 
 const CHAT_SESSION_KEY = "reid:chatSessionId";
 
-/** Free-tier session quota. A "session" here is one of the rows in the
- *  `sessions` table — the user gets this many before the paywall closes the
- *  door. Onboarding (STARTING POINT) is not counted; only chat sessions are. */
-export const FREE_SESSIONS = 3;
+/** Free-tier session quota — re-exported from session-shared.ts so the value
+ *  can also be read from server code (which can't import this "use client"
+ *  module). */
+export { FREE_SESSIONS };
 
 /** The active /chat sessionId, set the first time the user POSTs to /api/reid
  *  from the chat page (server returns it via the X-Reid-Session-Id header).

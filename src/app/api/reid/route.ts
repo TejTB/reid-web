@@ -18,6 +18,7 @@ import {
 } from "@/lib/session-server";
 import { reidRequestSchema } from "@/lib/validation";
 import { checkDailyMessageLimit } from "@/lib/ratelimit";
+import { FREE_SESSIONS } from "@/lib/session-shared";
 
 // ----- SentinelStripper ---------------------------------------------------
 //
@@ -385,6 +386,42 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Resolve sessionId early so we can decide whether THIS request would
+  // create a NEW session — that's what the free-tier session-limit gate
+  // cares about. We honor the client-supplied id only if it belongs to this
+  // user. We do NOT mint a fresh session yet; that happens below, after the
+  // session-limit and daily-rate-limit checks have passed.
+  let creatingNewSession = false;
+  if (sessionId) {
+    const ok = await sessionBelongsTo(db, sessionId, userId);
+    if (!ok) {
+      sessionId = undefined;
+      creatingNewSession = true;
+    }
+  } else {
+    creatingNewSession = true;
+  }
+
+  // Free-tier session-limit gate (402). Onboarding is exempt — it's the
+  // founder's first interaction with Reid and must always be allowed.
+  if (
+    creatingNewSession &&
+    mode === "chat" &&
+    subscriptionStatus !== "pro"
+  ) {
+    const { count } = await db
+      .from("sessions")
+      .select("id", { head: true, count: "exact" })
+      .eq("user_id", userId);
+    const used = count ?? 0;
+    if (used >= FREE_SESSIONS) {
+      return Response.json(
+        { error: "session_limit_reached", sessionsUsed: used },
+        { status: 402 },
+      );
+    }
+  }
+
   if (subscriptionStatus !== "pro") {
     const rate = await checkDailyMessageLimit(userId);
     if (!rate.allowed) {
@@ -395,12 +432,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Resolve sessionId: honor client-supplied id only if it exists and belongs
-  // to this user. Otherwise mint a fresh session.
-  if (sessionId) {
-    const ok = await sessionBelongsTo(db, sessionId, userId);
-    if (!ok) sessionId = undefined;
-  }
   if (!sessionId) {
     sessionId = await createSession(db, userId);
   }

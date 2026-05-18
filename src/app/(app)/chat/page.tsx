@@ -6,8 +6,9 @@ import ChatInput from "@/components/ChatInput";
 import LogoMark from "@/components/LogoMark";
 import VoiceButton from "@/components/VoiceButton";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
-import { streamReid, DailyLimitError } from "@/lib/reid";
+import { streamReid, DailyLimitError, SessionLimitError } from "@/lib/reid";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
+import { FREE_SESSIONS } from "@/lib/session-shared";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
 import type { Message } from "@/types/chat";
 import type { Message as DbMessage, Session as DbSession } from "@/types/db";
@@ -61,6 +62,21 @@ export default function ChatPage() {
         }
         return { ok: true, text: acc, sessionId: resolvedSessionId };
       } catch (err) {
+        // Paywall (402): session_limit_reached opens the upgrade modal and
+        // rolls back the optimistic user turn. No retry — the free quota is
+        // exhausted and a retry would 402 again.
+        if (err instanceof SessionLimitError) {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("reid:open-paywall"));
+          }
+          setMessages((prev) => prev.slice(0, -1));
+          setStreamingText("");
+          return {
+            ok: false,
+            text: "",
+            sessionId: resolvedSessionId,
+          };
+        }
         // Paywall: 429 daily_limit_exceeded opens the upgrade modal and
         // rolls back the optimistic user turn — no retry, no "Give me a
         // moment" placeholder.
@@ -97,7 +113,10 @@ export default function ChatPage() {
           }
           return { ok: true, text: acc, sessionId: resolvedSessionId };
         } catch (retryErr) {
-          if (retryErr instanceof DailyLimitError) {
+          if (
+            retryErr instanceof DailyLimitError ||
+            retryErr instanceof SessionLimitError
+          ) {
             if (typeof window !== "undefined") {
               window.dispatchEvent(new CustomEvent("reid:open-paywall"));
             }
@@ -154,6 +173,45 @@ export default function ChatPage() {
       setLoaded(true);
     })();
   }, [authLoading, me, router]);
+
+  // Unmount keepalive: when the user navigates away from /chat without Reid
+  // emitting [SESSION_COMPLETE], fire a best-effort POST to /api/sessions/
+  // summarise so the session gets a summary instead of staying blank. The
+  // server route is idempotent — if it's already summarised (sentinel path
+  // or HMR double-fire), it returns early without calling Anthropic.
+  //
+  // Refs hold the latest sessionId and assistant-message presence so the
+  // cleanup closure sees current values, not the values at mount. The firing
+  // effect's deps are `[]` so it ONLY runs on mount/unmount.
+  const sessionIdRef = useRef<string | null>(null);
+  const hasAssistantMessageRef = useRef<boolean>(false);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+    hasAssistantMessageRef.current = messages.some(
+      (m) => m.role === "assistant",
+    );
+  });
+  useEffect(() => {
+    return () => {
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+      if (!hasAssistantMessageRef.current) return;
+      try {
+        void fetch("/api/sessions/summarise", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: sid }),
+          keepalive: true,
+        }).catch(() => {
+          // Best-effort; the route is idempotent on retry.
+        });
+      } catch {
+        // Best-effort; swallow.
+      }
+    };
+    // Mount/unmount only — refs above carry the latest values into cleanup.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSend(content: string) {
     if (!userId || isStreaming) return;
@@ -301,6 +359,24 @@ export default function ChatPage() {
           </span>
         </div>
         <div className="flex items-center gap-3">
+          {!isPro && me && (() => {
+            const completed = me.session_count ?? 0;
+            const displayed = Math.min(FREE_SESSIONS, completed + 1);
+            const onLastFree = displayed >= FREE_SESSIONS;
+            return (
+              <span
+                className="font-sans"
+                style={{
+                  fontSize: 11,
+                  letterSpacing: "0.04em",
+                  color: onLastFree ? "#B91C1C" : "rgba(255,255,255,0.30)",
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                Session {displayed} of {FREE_SESSIONS}
+              </span>
+            );
+          })()}
           <VoiceButton
             latestReidMessage={latestReidMessage}
             isPro={isPro}
@@ -358,6 +434,28 @@ export default function ChatPage() {
           emptyState={emptyState}
           headerSlot={headerSlot}
         />
+      )}
+      {!isPro && me && (me.session_count ?? 0) + 1 >= FREE_SESSIONS && (
+        <div
+          className="fixed left-0 right-0 z-50 bottom-[calc(64px+env(safe-area-inset-bottom)+96px)] md:bottom-[96px] pointer-events-none"
+          aria-live="polite"
+        >
+          <div
+            className="mx-auto max-w-[720px] px-5 py-2 text-center"
+            style={{
+              background: "rgba(185,28,28,0.10)",
+              borderTop: "1px solid rgba(185,28,28,0.25)",
+              borderBottom: "1px solid rgba(185,28,28,0.25)",
+              color: "#B91C1C",
+              fontSize: 12,
+              letterSpacing: "0.02em",
+              backdropFilter: "blur(20px)",
+              WebkitBackdropFilter: "blur(20px)",
+            }}
+          >
+            This is your last free session.
+          </div>
+        </div>
       )}
       {!bootstrapError && (
         <ChatInput

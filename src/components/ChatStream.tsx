@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, type ReactNode } from "react";
 import type { Message } from "@/types/chat";
-import TypingDots from "./TypingDots";
+import { ShiningText } from "@/components/ui/shining-text";
 
 type ChatMessage = Message & { id?: string };
 
@@ -101,8 +101,9 @@ export default function ChatStream({
       )}
 
       {isStreaming && !streamingText && (
-        <div className="mb-8">
-          <TypingDots />
+        <div className="mb-8 flex items-center gap-2">
+          <span className="inline-block h-2 w-2 rounded-full bg-[#B91C1C] animate-pulse" />
+          <ShiningText text="thinking." />
         </div>
       )}
 

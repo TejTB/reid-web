@@ -20,6 +20,18 @@ export class DailyLimitError extends Error {
   }
 }
 
+/** Thrown when /api/reid returns 402 with `error: "session_limit_reached"`.
+ *  Mirrors DailyLimitError so the chat UI can open the paywall when the user
+ *  tries to start a NEW free-tier session beyond their quota. */
+export class SessionLimitError extends Error {
+  readonly sessionsUsed: number;
+  constructor(used: number) {
+    super("session_limit_reached");
+    this.name = "SessionLimitError";
+    this.sessionsUsed = used;
+  }
+}
+
 export async function* streamReid(
   req: ReidRequest,
   options: StreamReidOptions = {},
@@ -30,6 +42,23 @@ export async function* streamReid(
     body: JSON.stringify(req),
     signal: options.signal,
   });
+  if (res.status === 402) {
+    let used = 0;
+    try {
+      const body = (await res.json()) as {
+        error?: string;
+        sessionsUsed?: number;
+      };
+      used = typeof body.sessionsUsed === "number" ? body.sessionsUsed : 0;
+      if (body.error === "session_limit_reached") {
+        throw new SessionLimitError(used);
+      }
+    } catch (err) {
+      if (err instanceof SessionLimitError) throw err;
+      // Body wasn't JSON — fall through to the generic error.
+    }
+    throw new Error(`reid 402`);
+  }
   if (res.status === 429) {
     let remaining = 0;
     try {

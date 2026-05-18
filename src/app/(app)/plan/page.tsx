@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
+import { GlowCard } from "@/components/ui/glow-card";
 import { FREE_SESSIONS, getMySessions } from "@/lib/session";
 import type { Session, User } from "@/types/db";
 
@@ -431,33 +432,35 @@ function TimelineNode({
         {dot}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline" style={{ gap: 12 }}>
-          <span
-            className="font-sans"
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              color: "#7A90A8",
-            }}
-          >
-            {label}
-          </span>
-          {date && (
+        <GlowCard customSize glowColor="red" className="w-full p-4">
+          <div className="flex items-baseline" style={{ gap: 12 }}>
             <span
               className="font-sans"
               style={{
-                fontSize: 12,
-                color: "#3A5070",
-                fontWeight: 400,
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: "#7A90A8",
               }}
             >
-              {date}
+              {label}
             </span>
-          )}
-        </div>
-        {children}
+            {date && (
+              <span
+                className="font-sans"
+                style={{
+                  fontSize: 12,
+                  color: "#3A5070",
+                  fontWeight: 400,
+                }}
+              >
+                {date}
+              </span>
+            )}
+          </div>
+          {children}
+        </GlowCard>
       </div>
     </div>
   );
