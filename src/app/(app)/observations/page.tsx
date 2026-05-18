@@ -2,10 +2,29 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
+import { motion } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
+import { CardCanvas, Card } from "@/components/ui/card-canvas";
 import { supabase } from "@/lib/supabase";
 import { triggerObserve } from "@/lib/observe-trigger";
 import type { Observation, ObservationCategory } from "@/types/db";
+
+const CATEGORY_STYLES: Record<string, string> = {
+  avoidance:     "bg-[#B91C1C]/15 text-[#f87171] border border-[#B91C1C]/25",
+  pattern:       "bg-amber-900/20 text-amber-400 border border-amber-700/30",
+  contradiction: "bg-purple-900/20 text-purple-400 border border-purple-700/30",
+  strength:      "bg-green-900/20 text-green-400 border border-green-700/30",
+};
+
+function CategoryBadge({ category }: { category: string }) {
+  return (
+    <span
+      className={`text-xs px-2.5 py-0.5 rounded-full uppercase tracking-wider font-sans ${CATEGORY_STYLES[category] ?? CATEGORY_STYLES.avoidance}`}
+    >
+      {category}
+    </span>
+  );
+}
 
 // Read-only feed of every observation Reid has noted about the founder.
 // Two sources land here:
@@ -155,7 +174,7 @@ export default function ObservationsPage() {
   return (
     <div
       className="mx-auto"
-      style={{ maxWidth: 640, padding: "48px 24px 96px" }}
+      style={{ maxWidth: 880, padding: "48px 24px 96px" }}
     >
       <div
         className="flex items-start justify-between"
@@ -263,88 +282,37 @@ export default function ObservationsPage() {
           </button>
         </div>
       ) : observations.length === 0 ? (
-        <div
-          className="flex flex-col items-center text-center mx-auto"
-          style={{ padding: "64px 24px", maxWidth: 320 }}
-        >
-          <p
-            className="font-serif italic"
-            style={{
-              fontSize: 18,
-              color: "rgba(242,237,227,0.45)",
-              lineHeight: 1.5,
-            }}
-          >
-            Reid logs observations as he gets to know you.
-            <br />
-            Have a few real sessions. They&apos;ll start appearing here.
+        <div className="flex flex-col items-center justify-center py-24 text-center">
+          <p className="text-white/20 text-sm italic font-serif">
+            Reid hasn&apos;t noticed anything yet.
           </p>
+          <p className="text-white/10 text-xs mt-2 font-sans">Have a few real sessions.</p>
         </div>
       ) : (
-        <div className="flex flex-col" style={{ gap: 12 }}>
-          {observations.map((o, i) => {
-            const badge = badgeFor(o);
-            return (
-              <article
+        <CardCanvas className="block">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {observations.map((o, i) => (
+              <motion.div
                 key={o.id}
-                className="animate-fade-up"
-                style={{
-                  animationDelay: `${Math.min(i, 6) * 40}ms`,
-                  background: "#0F1E35",
-                  border: "1px solid rgba(255,255,255,0.07)",
-                  borderRadius: 12,
-                  padding: 20,
-                }}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: Math.min(i, 6) * 0.04 }}
               >
-                <div
-                  className="flex items-start justify-between"
-                  style={{ gap: 12, marginBottom: 14 }}
-                >
-                  <span
-                    className="font-sans"
-                    style={{
-                      display: "inline-block",
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      background: badge.color,
-                      color: "#FFFFFF",
-                      fontSize: 10,
-                      fontWeight: 500,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      lineHeight: 1.2,
-                    }}
-                  >
-                    {badge.label}
-                  </span>
-                  <span
-                    className="font-sans"
-                    style={{
-                      fontSize: 12,
-                      color: "rgba(242,237,227,0.45)",
-                      letterSpacing: "0.04em",
-                      fontVariantNumeric: "tabular-nums",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {formatShortDate(o.created_at)}
-                  </span>
-                </div>
-                <p
-                  className="font-serif italic"
-                  style={{
-                    fontSize: 16,
-                    lineHeight: "24px",
-                    color: "#F2EDE3",
-                    letterSpacing: "-0.005em",
-                  }}
-                >
-                  {o.text}
-                </p>
-              </article>
-            );
-          })}
-        </div>
+                <Card category={o.category ?? "avoidance"} className="p-5 min-h-[140px]">
+                  <div className="flex items-start justify-between mb-3">
+                    <CategoryBadge category={o.category ?? "avoidance"} />
+                    <span className="text-white/25 text-xs font-sans">
+                      {formatShortDate(o.created_at)}
+                    </span>
+                  </div>
+                  <p className="text-white/75 text-sm leading-relaxed font-serif italic [text-wrap:pretty]">
+                    {o.text}
+                  </p>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        </CardCanvas>
       )}
     </div>
   );

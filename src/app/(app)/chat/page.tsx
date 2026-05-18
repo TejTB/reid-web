@@ -1,8 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { AnimatePresence, motion } from "framer-motion";
+import { Mic } from "lucide-react";
 import ChatStream from "@/components/ChatStream";
-import ChatInput from "@/components/ChatInput";
 import LogoMark from "@/components/LogoMark";
 import VoiceButton from "@/components/VoiceButton";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
@@ -10,8 +12,139 @@ import { streamReid, DailyLimitError, SessionLimitError } from "@/lib/reid";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
 import { FREE_SESSIONS } from "@/lib/session-shared";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
+import { fetchAndPlay, type TtsPlaybackHandle } from "@/lib/voice";
+import { cn } from "@/lib/utils";
+import { PromptInputBox } from "@/components/ui/prompt-input-box";
+import { GlowCard } from "@/components/ui/glow-card";
+import { ShiningText } from "@/components/ui/shining-text";
 import type { Message } from "@/types/chat";
 import type { Message as DbMessage, Session as DbSession } from "@/types/db";
+
+// Action-card config: maps the server's REID_ACTIONS trailer types to the
+// label + destination + accent the chat page renders after a streamed turn.
+// Unknown types are ignored (return null in the render path).
+const ACTION_CONFIG: Record<
+  string,
+  { label: string; link: string; colour: string }
+> = {
+  observation_created: {
+    label: "Reid noticed something",
+    link: "/observations",
+    colour: "#B91C1C",
+  },
+  task_assigned: {
+    label: "New task assigned",
+    link: "/tasks",
+    colour: "#B91C1C",
+  },
+  goal_updated: {
+    label: "Goal updated",
+    link: "/goals",
+    colour: "#16a34a",
+  },
+  plan_updated: {
+    label: "Plan updated",
+    link: "/plan",
+    colour: "#B91C1C",
+  },
+};
+
+type VoiceState = "idle" | "listening" | "thinking" | "speaking";
+
+// SpeechRecognition is a vendor-prefixed web API with no widely-shipped TS
+// lib. Narrow the bits we touch so the rest of the file stays type-safe.
+interface SpeechRecognitionResultPiece {
+  transcript: string;
+}
+interface SpeechRecognitionResultRow {
+  0: SpeechRecognitionResultPiece;
+  isFinal: boolean;
+}
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<SpeechRecognitionResultRow>;
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
+// ---- Voice-mode inline visuals --------------------------------------------
+// ListeningBars / SpeakingBars are tiny equaliser-style indicators. They live
+// here (not in a shared file) because they're only used by the voice mode
+// surface on this page.
+function ListeningBars() {
+  return (
+    <div className="flex items-end gap-1 h-6" aria-hidden>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <motion.span
+          key={i}
+          className="w-1 rounded-full bg-white/70"
+          initial={{ height: 6 }}
+          animate={{ height: [6, 22, 10, 18, 8] }}
+          transition={{
+            repeat: Infinity,
+            duration: 0.9,
+            ease: "easeInOut",
+            delay: i * 0.08,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SpeakingBars() {
+  return (
+    <div className="flex items-end gap-1 h-6" aria-hidden>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <motion.span
+          key={i}
+          className="w-1 rounded-full bg-[#B91C1C]"
+          initial={{ height: 4 }}
+          animate={{ height: [4, 18, 8, 22, 6] }}
+          transition={{
+            repeat: Infinity,
+            duration: 0.7,
+            ease: "easeInOut",
+            delay: i * 0.06,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ---- File -> base64 data URL ----------------------------------------------
+// Used by handleSend when the PromptInputBox attached one or more images.
+// Each file is read via FileReader and resolved as the result data URL.
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") resolve(result);
+      else reject(new Error("FileReader returned non-string"));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("FileReader error"));
+    reader.readAsDataURL(file);
+  });
+}
 
 type SessionWithMessages = { session: DbSession; messages: DbMessage[] };
 
@@ -36,6 +169,21 @@ export default function ChatPage() {
   // Currently always empty — multi-session history loading is deferred. The
   // rendering path is wired so a single state update will turn it on.
   const [priorSessions] = useState<SessionWithMessages[]>([]);
+  // Sentinel actions emitted by the server after a streamed turn — drives the
+  // post-stream notification cards (observation_created, goal_updated, ...).
+  // Cleared at the start of every new send.
+  const [pendingActions, setPendingActions] = useState<string[]>([]);
+  // Voice-mode UI state. The toggle only renders when SpeechRecognition is
+  // available; `voiceState` drives the bars / mic indicator.
+  const [speechSupported] = useState<boolean>(() => getSpeechRecognitionCtor() !== null);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const ttsHandleRef = useRef<TtsPlaybackHandle | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
+  // True when the next finalised assistant message should be auto-spoken
+  // because the user just submitted via voice. Cleared once playback starts.
+  const speakNextRef = useRef(false);
   const initialized = useRef(false);
 
   const streamWithRetry = useCallback(
@@ -48,6 +196,9 @@ export default function ChatPage() {
       const onSession = (sid: string) => {
         resolvedSessionId = sid;
       };
+      const onActions = (types: string[]) => {
+        setPendingActions(types);
+      };
       try {
         for await (const chunk of streamReid(
           {
@@ -55,7 +206,7 @@ export default function ChatPage() {
             sessionId: currentSessionId,
             messages: msgs,
           },
-          { onSession },
+          { onSession, onActions },
         )) {
           acc += chunk;
           setStreamingText(acc);
@@ -106,7 +257,7 @@ export default function ChatPage() {
               sessionId: currentSessionId,
               messages: msgs,
             },
-            { onSession },
+            { onSession, onActions },
           )) {
             acc += chunk;
             setStreamingText(acc);
@@ -213,10 +364,31 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleSend(content: string) {
+  async function handleSend(content: string, files?: File[]) {
     if (!userId || isStreaming) return;
-    const nextMessages: Message[] = [...messages, { role: "user", content }];
+    // Convert any attached image files to base64 data URLs before we kick off
+    // the stream. The /api/reid route accepts these in Message.images[]. If
+    // any read fails we drop just that file and proceed with the rest — the
+    // user's text is the load-bearing part of the turn.
+    let images: string[] | undefined;
+    if (files && files.length > 0) {
+      try {
+        const settled = await Promise.allSettled(files.map(readFileAsDataUrl));
+        const ok = settled
+          .filter((r): r is PromiseFulfilledResult<string> => r.status === "fulfilled")
+          .map((r) => r.value);
+        if (ok.length > 0) images = ok;
+      } catch {
+        // Defensive: Promise.allSettled never throws, but if FileReader is
+        // unavailable we'd rather send the text alone than block the user.
+      }
+    }
+    const userMessage: Message = images
+      ? { role: "user", content, images }
+      : { role: "user", content };
+    const nextMessages: Message[] = [...messages, userMessage];
     setMessages(nextMessages);
+    setPendingActions([]);
     setIsStreaming(true);
     setStreamingText("");
     const result = await streamWithRetry(sessionId, nextMessages);
@@ -245,6 +417,171 @@ export default function ChatPage() {
     setStreamingText("");
     setIsStreaming(false);
   }
+
+  // ---- Voice mode handlers ------------------------------------------------
+  // The mic toggle starts a one-shot SpeechRecognition session, transcribes
+  // the user's speech, and routes the transcript through handleSend. For Pro
+  // users in voice mode we then auto-play Reid's reply via fetchAndPlay —
+  // same path the manual VoiceButton uses.
+
+  // Stop any active recognition / TTS when voice mode is dismissed.
+  useEffect(() => {
+    if (voiceMode) return;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    }
+    if (ttsAbortRef.current) {
+      ttsAbortRef.current.abort();
+      ttsAbortRef.current = null;
+    }
+    if (ttsHandleRef.current) {
+      ttsHandleRef.current.stop();
+      ttsHandleRef.current = null;
+    }
+    setVoiceState("idle");
+    speakNextRef.current = false;
+  }, [voiceMode]);
+
+  // Final unmount tear-down (covers leaving /chat while voice mode is on).
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+      }
+      if (ttsAbortRef.current) ttsAbortRef.current.abort();
+      if (ttsHandleRef.current) ttsHandleRef.current.stop();
+    };
+  }, []);
+
+  const handleVoiceTap = useCallback(() => {
+    if (!voiceMode) return;
+    // Tapping while speaking stops playback and returns to idle.
+    if (voiceState === "speaking") {
+      if (ttsHandleRef.current) {
+        ttsHandleRef.current.stop();
+        ttsHandleRef.current = null;
+      }
+      if (ttsAbortRef.current) {
+        ttsAbortRef.current.abort();
+        ttsAbortRef.current = null;
+      }
+      setVoiceState("idle");
+      return;
+    }
+    // Tapping while listening aborts the current recognition attempt.
+    if (voiceState === "listening") {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+        recognitionRef.current = null;
+      }
+      setVoiceState("idle");
+      return;
+    }
+    // Idle → start a fresh recognition session.
+    if (voiceState !== "idle") return;
+    if (isStreaming) return;
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) return;
+    const rec = new Ctor();
+    rec.lang = "en-GB";
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onresult = (e) => {
+      let transcript = "";
+      for (let i = 0; i < e.results.length; i++) {
+        const row = e.results[i];
+        if (row.isFinal) transcript += row[0].transcript;
+      }
+      transcript = transcript.trim();
+      if (!transcript) return;
+      // Mark the next assistant message as one to auto-speak, flip to
+      // thinking state, and dispatch through the normal chat pipeline.
+      speakNextRef.current = true;
+      setVoiceState("thinking");
+      void handleSend(transcript);
+    };
+    rec.onerror = () => {
+      setVoiceState("idle");
+      recognitionRef.current = null;
+    };
+    rec.onend = () => {
+      // If no result fired we'll be left in "listening" — drop back to idle.
+      // If a result did fire, voiceState is already "thinking".
+      setVoiceState((prev) => (prev === "listening" ? "idle" : prev));
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = rec;
+    setVoiceState("listening");
+    try {
+      rec.start();
+    } catch {
+      // start() can throw if mic permission is denied or already started.
+      setVoiceState("idle");
+      recognitionRef.current = null;
+    }
+    // handleSend is stable enough for our purposes — it reads the latest
+    // messages from state via setMessages closures internally.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceMode, voiceState, isStreaming]);
+
+  // After a streamed turn finishes in voice mode for a Pro user, auto-play
+  // the assistant message via /api/tts. Free users in voice mode get the
+  // thinking → idle transition without playback (consistent with the
+  // VoiceButton free-preview gating).
+  const latestAssistantContent = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant") return messages[i].content;
+    }
+    return "";
+  })();
+  useEffect(() => {
+    if (!voiceMode) return;
+    if (isStreaming) return;
+    if (!speakNextRef.current) return;
+    if (!latestAssistantContent) return;
+    speakNextRef.current = false;
+    if (!isPro) {
+      // Free users can't auto-play in voice mode — drop to idle so the user
+      // can tap to speak again.
+      setVoiceState("idle");
+      return;
+    }
+    const ac = new AbortController();
+    ttsAbortRef.current = ac;
+    setVoiceState("speaking");
+    void fetchAndPlay({
+      text: latestAssistantContent,
+      preview: false,
+      signal: ac.signal,
+      onEnded: () => {
+        if (ttsAbortRef.current !== ac) return;
+        ttsAbortRef.current = null;
+        ttsHandleRef.current = null;
+        setVoiceState("idle");
+      },
+    }).then(({ result, handle }) => {
+      if (result.ok && handle) {
+        ttsHandleRef.current = handle;
+      } else {
+        ttsAbortRef.current = null;
+        ttsHandleRef.current = null;
+        setVoiceState("idle");
+      }
+    });
+  }, [voiceMode, isStreaming, latestAssistantContent, isPro]);
 
   const subtitle = lastSessionAt
     ? `Last session: ${formatLastSession(lastSessionAt)}`
@@ -377,6 +714,22 @@ export default function ChatPage() {
               </span>
             );
           })()}
+          {speechSupported && (
+            <button
+              type="button"
+              onClick={() => setVoiceMode((v) => !v)}
+              className={cn(
+                "flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs transition-all",
+                voiceMode
+                  ? "border-white/40 text-white bg-white/5"
+                  : "border-white/10 text-white/30 hover:text-white/50",
+              )}
+              aria-pressed={voiceMode}
+              aria-label={voiceMode ? "Switch to text" : "Switch to voice"}
+            >
+              {voiceMode ? <span>Voice on</span> : <span>Voice</span>}
+            </button>
+          )}
           <VoiceButton
             latestReidMessage={latestReidMessage}
             isPro={isPro}
@@ -435,6 +788,48 @@ export default function ChatPage() {
           headerSlot={headerSlot}
         />
       )}
+      {/* Post-stream action notification cards. Rendered between the chat
+          stream and the input wrapper so they sit just above the latest
+          message, below the input bar's visual stack. Each card maps a
+          REID_ACTIONS trailer type to a labelled GlowCard link. */}
+      {!isStreaming && pendingActions.length > 0 && (
+        <div className="pointer-events-none fixed left-0 right-0 z-40 bottom-[calc(64px+env(safe-area-inset-bottom)+120px)] md:bottom-[120px] px-4">
+          <div className="mx-auto flex max-w-[720px] flex-col gap-2 pointer-events-auto">
+            {pendingActions.map((type) => {
+              const cfg = ACTION_CONFIG[type];
+              if (!cfg) return null;
+              return (
+                <motion.div
+                  key={type}
+                  initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                >
+                  <GlowCard customSize glowColor="red" className="w-full">
+                    <div className="px-4 py-3 flex items-center justify-between bg-[#111111] rounded-xl">
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className="w-1.5 h-1.5 rounded-full animate-pulse"
+                          style={{ background: cfg.colour }}
+                        />
+                        <span className="text-white/60 text-xs font-sans">
+                          {cfg.label}
+                        </span>
+                      </div>
+                      <Link
+                        href={cfg.link}
+                        className="text-[#B91C1C] text-xs hover:text-white transition-colors font-sans"
+                      >
+                        View →
+                      </Link>
+                    </div>
+                  </GlowCard>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {!isPro && me && (me.session_count ?? 0) + 1 >= FREE_SESSIONS && (
         <div
           className="fixed left-0 right-0 z-50 bottom-[calc(64px+env(safe-area-inset-bottom)+96px)] md:bottom-[96px] pointer-events-none"
@@ -458,11 +853,115 @@ export default function ChatPage() {
         </div>
       )}
       {!bootstrapError && (
-        <ChatInput
-          onSubmit={handleSend}
-          disabled={isStreaming || !loaded}
-          autofocus={loaded && messages.length === 0 && !isStreaming}
-        />
+        <div className="fixed left-0 right-0 z-50 bottom-[calc(64px+env(safe-area-inset-bottom))] md:bottom-0 px-4 pb-4 pt-2">
+          <div className="mx-auto max-w-[720px]">
+            <AnimatePresence mode="wait">
+              {voiceMode ? (
+                <motion.div
+                  key="voice-mode"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 20 }}
+                  className="flex flex-col items-center justify-center pb-2 pt-2 gap-6"
+                >
+                  <AnimatePresence mode="wait">
+                    {voiceState === "speaking" ? (
+                      <motion.div
+                        key="reid-speaking"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="flex items-center gap-3"
+                      >
+                        <SpeakingBars />
+                        <span className="text-white/60 text-xs font-sans">
+                          Reid is speaking
+                        </span>
+                      </motion.div>
+                    ) : voiceState === "thinking" ? (
+                      <motion.div
+                        key="thinking"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                      >
+                        <ShiningText text="thinking." />
+                      </motion.div>
+                    ) : voiceState === "listening" ? (
+                      <motion.div
+                        key="listening"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="flex items-center gap-3"
+                      >
+                        <ListeningBars />
+                        <span className="text-white/60 text-xs font-sans">
+                          Listening...
+                        </span>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="idle"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="text-white/20 text-xs font-sans"
+                      >
+                        Tap to speak
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleVoiceTap}
+                    disabled={voiceState === "thinking" || isStreaming}
+                    className={cn(
+                      "flex h-16 w-16 items-center justify-center rounded-full border transition-colors",
+                      voiceState === "listening"
+                        ? "border-white/40 bg-white/10 text-white"
+                        : voiceState === "speaking"
+                          ? "border-[#B91C1C]/60 bg-[#B91C1C]/20 text-[#B91C1C]"
+                          : voiceState === "thinking"
+                            ? "border-white/10 bg-white/5 text-white/30"
+                            : "border-white/15 bg-white/5 text-white/60 hover:text-white",
+                    )}
+                    aria-label={
+                      voiceState === "listening"
+                        ? "Stop listening"
+                        : voiceState === "speaking"
+                          ? "Stop playback"
+                          : "Tap to speak"
+                    }
+                  >
+                    <Mic className="h-6 w-6" />
+                  </motion.button>
+                  <button
+                    type="button"
+                    onClick={() => setVoiceMode(false)}
+                    className="text-white/20 text-xs hover:text-white/40 font-sans"
+                  >
+                    Switch to text
+                  </button>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="text-mode"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 20 }}
+                >
+                  <PromptInputBox
+                    onSend={handleSend}
+                    isLoading={isStreaming || !loaded}
+                    placeholder="Say something..."
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
       )}
     </div>
   );

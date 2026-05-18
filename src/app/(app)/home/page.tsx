@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
+import { GlowCard } from "@/components/ui/glow-card";
 import PushOptInBanner from "@/components/PushOptInBanner";
 import ObservationsCard from "@/components/ObservationsCard";
 import { useAuth } from "@/components/AuthProvider";
@@ -215,124 +216,130 @@ export default function HomePage() {
           className="animate-fade-up"
           style={{ animationDelay: "0ms" }}
         >
-          <GlassCard title="YOUR FOCUS">
-            {summary ? (
-              <p className="font-serif italic text-text-primary text-[20px] leading-[1.55] whitespace-pre-wrap [text-wrap:pretty]">
-                {summary}
-              </p>
-            ) : (
-              <p
-                className="font-sans"
-                style={{ fontSize: 15, color: "#7A90A8" }}
-              >
-                Complete your first session with Reid.
-              </p>
-            )}
-            {/* Momentum bar — caps visually at 100% when sessionCount hits
-                FREE_SESSIONS; milestone label keeps progressing past that
-                for Pro users. */}
-            <div className="mt-4">
-              <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-accent transition-all duration-500"
-                  style={{ width: `${progressPct}%` }}
-                />
+          <GlowCard customSize glowColor="red" className="w-full">
+            <GlassCard title="YOUR FOCUS">
+              {summary ? (
+                <p className="font-serif italic text-text-primary text-[20px] leading-[1.55] whitespace-pre-wrap [text-wrap:pretty]">
+                  {summary}
+                </p>
+              ) : (
+                <p
+                  className="font-sans"
+                  style={{ fontSize: 15, color: "#7A90A8" }}
+                >
+                  Complete your first session with Reid.
+                </p>
+              )}
+              {/* Momentum bar — caps visually at 100% when sessionCount hits
+                  FREE_SESSIONS; milestone label keeps progressing past that
+                  for Pro users. */}
+              <div className="mt-4">
+                <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-accent transition-all duration-500"
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-text-dim font-sans">
+                  Session {sessionCount} of {FREE_SESSIONS} — {milestoneLabel}
+                </p>
               </div>
-              <p className="mt-2 text-xs text-text-dim font-sans">
-                Session {sessionCount} of {FREE_SESSIONS} — {milestoneLabel}
-              </p>
-            </div>
-          </GlassCard>
+            </GlassCard>
+          </GlowCard>
         </div>
 
         <div
           className="animate-fade-up"
           style={{ animationDelay: "80ms" }}
         >
-          <GlassCard title="TODAY'S TASK">
-            {task ? (
-              <div className="flex items-start" style={{ gap: 14 }}>
-                <button
-                  type="button"
-                  role="checkbox"
-                  aria-checked={taskDone}
-                  aria-label={taskDone ? "Mark task incomplete" : "Mark task complete"}
-                  onClick={toggleTask}
-                  className="flex items-center justify-center shrink-0"
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: "50%",
-                    border: taskDone
-                      ? "1.5px solid transparent"
-                      : "1.5px solid rgba(255,255,255,0.2)",
-                    background: taskDone ? "#B91C1C" : "transparent",
-                    cursor: "pointer",
-                    transition: "all 200ms ease",
-                    marginTop: 2,
-                  }}
-                >
-                  {taskDone && (
-                    <Check size={12} strokeWidth={2.5} color="#F2EDE3" />
-                  )}
-                </button>
+          <GlowCard customSize glowColor="red" className="w-full">
+            <GlassCard title="TODAY'S TASK">
+              {task ? (
+                <div className="flex items-start" style={{ gap: 14 }}>
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={taskDone}
+                    aria-label={taskDone ? "Mark task incomplete" : "Mark task complete"}
+                    onClick={toggleTask}
+                    className="flex items-center justify-center shrink-0"
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: "50%",
+                      border: taskDone
+                        ? "1.5px solid transparent"
+                        : "1.5px solid rgba(255,255,255,0.2)",
+                      background: taskDone ? "#B91C1C" : "transparent",
+                      cursor: "pointer",
+                      transition: "all 200ms ease",
+                      marginTop: 2,
+                    }}
+                  >
+                    {taskDone && (
+                      <Check size={12} strokeWidth={2.5} color="#F2EDE3" />
+                    )}
+                  </button>
+                  <p
+                    className="font-sans"
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 400,
+                      color: taskDone ? "#7A90A8" : "#F2EDE3",
+                      textDecoration: taskDone ? "line-through" : "none",
+                      transition:
+                        "color 300ms ease, text-decoration-color 300ms ease",
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {task}
+                  </p>
+                </div>
+              ) : (
                 <p
                   className="font-sans"
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 400,
-                    color: taskDone ? "#7A90A8" : "#F2EDE3",
-                    textDecoration: taskDone ? "line-through" : "none",
-                    transition:
-                      "color 300ms ease, text-decoration-color 300ms ease",
-                    lineHeight: 1.55,
-                  }}
+                  style={{ fontSize: 15, color: "#7A90A8" }}
                 >
-                  {task}
+                  Reid will assign your task at the end of your next session.
                 </p>
-              </div>
-            ) : (
-              <p
-                className="font-sans"
-                style={{ fontSize: 15, color: "#7A90A8" }}
-              >
-                Reid will assign your task at the end of your next session.
-              </p>
-            )}
-          </GlassCard>
+              )}
+            </GlassCard>
+          </GlowCard>
         </div>
 
         <div
           className="animate-fade-up"
           style={{ animationDelay: "160ms" }}
         >
-          <GlassCard title="CONTINUE">
-            <p
-              className="font-sans"
-              style={{
-                fontSize: 15,
-                color: "#7A90A8",
-                marginBottom: 20,
-              }}
-            >
-              Your co-founder is ready.
-            </p>
-            <Link
-              href="/chat"
-              className="cta-shadow w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-text-primary transition-all duration-200 hover:-translate-y-px"
-              style={{
-                height: 46,
-                borderRadius: 9,
-                fontFamily: "var(--font-sans), sans-serif",
-                fontSize: 13,
-                fontWeight: 500,
-                letterSpacing: "0.04em",
-              }}
-            >
-              <span>Open session</span>
-              <ArrowRight size={16} strokeWidth={2} />
-            </Link>
-          </GlassCard>
+          <GlowCard customSize glowColor="red" className="w-full">
+            <GlassCard title="CONTINUE">
+              <p
+                className="font-sans"
+                style={{
+                  fontSize: 15,
+                  color: "#7A90A8",
+                  marginBottom: 20,
+                }}
+              >
+                Your co-founder is ready.
+              </p>
+              <Link
+                href="/chat"
+                className="cta-shadow w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-text-primary transition-all duration-200 hover:-translate-y-px"
+                style={{
+                  height: 46,
+                  borderRadius: 9,
+                  fontFamily: "var(--font-sans), sans-serif",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                <span>Open session</span>
+                <ArrowRight size={16} strokeWidth={2} />
+              </Link>
+            </GlassCard>
+          </GlowCard>
 
           {/* Self-hides when there are no observations yet, so brand-new
               founders don't see dead surface area. */}

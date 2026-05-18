@@ -16,6 +16,7 @@ import GoalCard from "@/components/GoalCard";
 import GoalEventFeed from "@/components/GoalEventFeed";
 import GoalCompleteOverlay from "@/components/GoalCompleteOverlay";
 import CompletedGoalsSection from "@/components/CompletedGoalsSection";
+import { GlowCard } from "@/components/ui/glow-card";
 
 const FLASH_MS = 2000;
 
@@ -240,43 +241,49 @@ export default function GoalsPage() {
           <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 20 }}>
             {primary ? (
               <div className="animate-fade-up" style={{ animationDelay: "0ms" }}>
-                <PrimaryGoalHero
-                  goal={primary}
-                  flash={recentlyUpdated.has(primary.id)}
-                />
+                <GlowCard customSize glowColor="red" className="w-full">
+                  <PrimaryGoalHero
+                    goal={primary}
+                    flash={recentlyUpdated.has(primary.id)}
+                  />
+                </GlowCard>
               </div>
             ) : (
               // No active goals but we DO have completed ones — render a
               // light prompt instead of the hero so the page still feels
               // alive.
               <div
-                className="home-card animate-fade-up"
+                className="animate-fade-up"
                 style={{ animationDelay: "0ms" }}
               >
-                <p
-                  className="font-serif italic text-text-secondary [text-wrap:pretty]"
-                  style={{ fontSize: 18, lineHeight: 1.5 }}
-                >
-                  Every active goal is done. Open a session and tell Reid
-                  what's next.
-                </p>
-                <Link
-                  href="/chat"
-                  className="cta-shadow inline-flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-text-primary transition-all duration-200 hover:-translate-y-px"
-                  style={{
-                    marginTop: 18,
-                    height: 42,
-                    padding: "0 22px",
-                    borderRadius: 9,
-                    fontFamily: "var(--font-sans), sans-serif",
-                    fontSize: 13,
-                    fontWeight: 500,
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  <span>Open session</span>
-                  <ArrowRight size={16} strokeWidth={2} />
-                </Link>
+                <GlowCard customSize glowColor="red" className="w-full">
+                  <div className="home-card">
+                    <p
+                      className="font-serif italic text-text-secondary [text-wrap:pretty]"
+                      style={{ fontSize: 18, lineHeight: 1.5 }}
+                    >
+                      Every active goal is done. Open a session and tell Reid
+                      what's next.
+                    </p>
+                    <Link
+                      href="/chat"
+                      className="cta-shadow inline-flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-text-primary transition-all duration-200 hover:-translate-y-px"
+                      style={{
+                        marginTop: 18,
+                        height: 42,
+                        padding: "0 22px",
+                        borderRadius: 9,
+                        fontFamily: "var(--font-sans), sans-serif",
+                        fontSize: 13,
+                        fontWeight: 500,
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      <span>Open session</span>
+                      <ArrowRight size={16} strokeWidth={2} />
+                    </Link>
+                  </div>
+                </GlowCard>
               </div>
             )}
 
@@ -307,7 +314,9 @@ export default function GoalsPage() {
             className="lg:w-[300px] lg:shrink-0 animate-fade-up"
             style={{ animationDelay: "160ms" }}
           >
-            <GoalEventFeed events={events} />
+            <GlowCard customSize glowColor="red" className="w-full">
+              <GoalEventFeed events={events} />
+            </GlowCard>
           </div>
         </div>
       )}

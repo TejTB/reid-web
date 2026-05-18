@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Check, CheckCircle } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { supabase } from "@/lib/supabase";
+import { CardCanvas, Card } from "@/components/ui/card-canvas";
 
 const MONTHS_SHORT = [
   "Jan",
@@ -272,93 +273,90 @@ export default function TasksPage() {
             </p>
           </div>
         ) : (
-          <ul
-            className="flex flex-col"
-            style={{ gap: 12, listStyle: "none" }}
-          >
-            {tasks.map((t, i) => {
-              const done = !!doneMap[t.index];
-              return (
-                <li
-                  key={t.index}
-                  className="animate-fade-up"
-                  style={{ animationDelay: `${i * 60}ms` }}
-                >
-                  <div
-                    className="flex items-start"
+          <CardCanvas>
+            <ul
+              className="flex flex-col"
+              style={{ gap: 12, listStyle: "none" }}
+            >
+              {tasks.map((t, i) => {
+                const done = !!doneMap[t.index];
+                return (
+                  <li
+                    key={t.index}
+                    className="animate-fade-up"
                     style={{
-                      background: done
-                        ? "rgba(255,255,255,0.02)"
-                        : "rgba(255,255,255,0.04)",
-                      border: done
-                        ? "1px solid rgba(255,255,255,0.04)"
-                        : "1px solid rgba(255,255,255,0.07)",
-                      borderRadius: 12,
-                      padding: "18px 22px",
-                      gap: 16,
+                      animationDelay: `${i * 60}ms`,
+                      opacity: done ? 0.6 : 1,
                     }}
                   >
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={done}
-                      aria-label={
-                        done ? "Task complete" : "Mark task complete"
-                      }
-                      onClick={() => complete(t)}
-                      disabled={done}
-                      className="shrink-0 flex items-center justify-center"
-                      style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: "50%",
-                        border: done
-                          ? "1.5px solid transparent"
-                          : "1.5px solid rgba(255,255,255,0.2)",
-                        background: done ? "#B91C1C" : "transparent",
-                        cursor: done ? "default" : "pointer",
-                        transition:
-                          "background-color 200ms ease-out, border-color 200ms ease-out, opacity 200ms ease-out",
-                        marginTop: 2,
-                      }}
-                    >
-                      {done && (
-                        <Check size={12} strokeWidth={2.5} color="#F2EDE3" />
-                      )}
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className="font-sans whitespace-pre-wrap [text-wrap:pretty]"
-                        style={{
-                          fontSize: 15,
-                          color: "#F2EDE3",
-                          textDecoration: done ? "line-through" : "none",
-                          opacity: done ? 0.6 : 1,
-                          transition:
-                            "opacity 200ms ease-out, text-decoration-color 200ms ease-out",
-                          lineHeight: 1.55,
-                        }}
+                    <Card className="p-0">
+                      <div
+                        className="flex items-start"
+                        style={{ padding: "18px 22px", gap: 16 }}
                       >
-                        {t.text}
-                      </p>
-                      <p
-                        className="font-sans"
-                        style={{
-                          fontSize: 12,
-                          color: "#3A5070",
-                          marginTop: 8,
-                        }}
-                      >
-                        Assigned {t.assignedDate}
-                        {t.assignedDate ? "  ·  " : ""}
-                        {t.source}
-                      </p>
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                        <button
+                          type="button"
+                          role="checkbox"
+                          aria-checked={done}
+                          aria-label={
+                            done ? "Task complete" : "Mark task complete"
+                          }
+                          onClick={() => complete(t)}
+                          disabled={done}
+                          className="shrink-0 flex items-center justify-center"
+                          style={{
+                            width: 22,
+                            height: 22,
+                            borderRadius: "50%",
+                            border: done
+                              ? "1.5px solid transparent"
+                              : "1.5px solid rgba(255,255,255,0.2)",
+                            background: done ? "#B91C1C" : "transparent",
+                            cursor: done ? "default" : "pointer",
+                            transition:
+                              "background-color 200ms ease-out, border-color 200ms ease-out, opacity 200ms ease-out",
+                            marginTop: 2,
+                          }}
+                        >
+                          {done && (
+                            <Check size={12} strokeWidth={2.5} color="#F2EDE3" />
+                          )}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className="font-sans whitespace-pre-wrap [text-wrap:pretty]"
+                            style={{
+                              fontSize: 15,
+                              color: "#F2EDE3",
+                              textDecoration: done ? "line-through" : "none",
+                              opacity: done ? 0.6 : 1,
+                              transition:
+                                "opacity 200ms ease-out, text-decoration-color 200ms ease-out",
+                              lineHeight: 1.55,
+                            }}
+                          >
+                            {t.text}
+                          </p>
+                          <p
+                            className="font-sans"
+                            style={{
+                              fontSize: 12,
+                              color: "#3A5070",
+                              marginTop: 8,
+                            }}
+                          >
+                            Assigned {t.assignedDate}
+                            {t.assignedDate ? "  ·  " : ""}
+                            {t.source}
+                          </p>
+                        </div>
+                      </div>
+                    </Card>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardCanvas>
         )}
       </div>
 

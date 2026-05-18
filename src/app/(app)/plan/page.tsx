@@ -133,8 +133,13 @@ export default function PlanPage() {
       summary: onboardingSummary,
     });
 
-    // `sessions` arrives newest-first; reverse to oldest-first.
-    const oldestFirst = [...sessions].reverse();
+    // `sessions` arrives newest-first; reverse to oldest-first. Drop completed
+    // sessions that never produced a summary (abandoned/failed) — they
+    // clutter the roadmap and shouldn't count toward the free-tier cap UX.
+    // Active sessions (ended_at === null) are always kept.
+    const oldestFirst = [...sessions]
+      .reverse()
+      .filter((s) => isSessionActive(s) || (s.summary && s.summary.trim().length > 0));
     let actualSessionCount = 0;
     oldestFirst.forEach((s, i) => {
       const label = `SESSION ${i + 2}`;
@@ -213,6 +218,12 @@ export default function PlanPage() {
             className="rounded-[12px] bg-bg-card animate-skeleton"
             style={{ height: 80, animationDelay: "200ms" }}
           />
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24">
+          <p className="text-white/20 text-sm italic font-serif">
+            Your plan builds after each completed session.
+          </p>
         </div>
       ) : (
         <div className="relative">

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { FREE_SESSIONS } from "@/lib/session";
 import { PLAN_ANNUAL, PLAN_MONTHLY, type PlanInterval } from "@/lib/stripe-public";
+import { GlowCard } from "@/components/ui/glow-card";
 
 // Globally mounted modal that opens when anything dispatches the
 // `reid:open-paywall` CustomEvent. The chat page fires it when /api/reid
@@ -201,62 +202,64 @@ function PaywallChoice({
   onSelect,
 }: PaywallChoiceProps) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={disabled}
-      className="cta-shadow font-sans"
-      style={{
-        textAlign: "left",
-        padding: "16px 18px",
-        borderRadius: 9,
-        background: highlight ? "#B91C1C" : "rgba(255,255,255,0.04)",
-        border: highlight
-          ? "none"
-          : "1px solid rgba(255,255,255,0.08)",
-        color: "#F2EDE3",
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled && !pending ? 0.5 : 1,
-        transition: "opacity 200ms ease, transform 200ms ease",
-      }}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-baseline" style={{ gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 500 }}>{plan.label}</span>
-          <span
+    <GlowCard customSize glowColor="red" className="w-full">
+      <button
+        type="button"
+        onClick={onSelect}
+        disabled={disabled}
+        className="cta-shadow font-sans"
+        style={{
+          textAlign: "left",
+          padding: "16px 18px",
+          borderRadius: 9,
+          background: highlight ? "#B91C1C" : "rgba(255,255,255,0.04)",
+          border: highlight
+            ? "none"
+            : "1px solid rgba(255,255,255,0.08)",
+          color: "#F2EDE3",
+          cursor: disabled ? "default" : "pointer",
+          opacity: disabled && !pending ? 0.5 : 1,
+          transition: "opacity 200ms ease, transform 200ms ease",
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-baseline" style={{ gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 500 }}>{plan.label}</span>
+            <span
+              style={{
+                fontSize: 12,
+                color: highlight ? "rgba(255,255,255,0.7)" : "#7A90A8",
+              }}
+            >
+              {plan.caption}
+            </span>
+          </div>
+          <div className="flex items-baseline" style={{ gap: 6 }}>
+            <span style={{ fontSize: 18, fontWeight: 500 }}>
+              {plan.priceLabel}
+            </span>
+            <span
+              style={{
+                fontSize: 12,
+                color: highlight ? "rgba(255,255,255,0.7)" : "#7A90A8",
+              }}
+            >
+              {plan.cadence}
+            </span>
+          </div>
+        </div>
+        {pending && (
+          <p
             style={{
+              marginTop: 8,
               fontSize: 12,
-              color: highlight ? "rgba(255,255,255,0.7)" : "#7A90A8",
+              color: highlight ? "rgba(255,255,255,0.85)" : "#C8D5E3",
             }}
           >
-            {plan.caption}
-          </span>
-        </div>
-        <div className="flex items-baseline" style={{ gap: 6 }}>
-          <span style={{ fontSize: 18, fontWeight: 500 }}>
-            {plan.priceLabel}
-          </span>
-          <span
-            style={{
-              fontSize: 12,
-              color: highlight ? "rgba(255,255,255,0.7)" : "#7A90A8",
-            }}
-          >
-            {plan.cadence}
-          </span>
-        </div>
-      </div>
-      {pending && (
-        <p
-          style={{
-            marginTop: 8,
-            fontSize: 12,
-            color: highlight ? "rgba(255,255,255,0.85)" : "#C8D5E3",
-          }}
-        >
-          Opening checkout…
-        </p>
-      )}
-    </button>
+            Opening checkout…
+          </p>
+        )}
+      </button>
+    </GlowCard>
   );
 }

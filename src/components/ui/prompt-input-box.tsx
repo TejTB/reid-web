@@ -1,0 +1,239 @@
+"use client";
+import React from "react";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+import { ArrowUp, Paperclip, Square, StopCircle, Mic, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement>;
+const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
+  ({ className, ...props }, ref) => (
+    <textarea
+      ref={ref}
+      rows={1}
+      className={cn(
+        "flex w-full rounded-md border-none bg-transparent px-3 py-2.5 text-sm text-gray-100 placeholder:text-white/30 focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50 min-h-[44px] resize-none",
+        className,
+      )}
+      {...props}
+    />
+  ),
+);
+Textarea.displayName = "Textarea";
+
+const TooltipProvider = TooltipPrimitive.Provider;
+const Tooltip = TooltipPrimitive.Root;
+const TooltipTrigger = TooltipPrimitive.Trigger;
+const TooltipContent = React.forwardRef<
+  React.ElementRef<typeof TooltipPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
+>(({ className, sideOffset = 4, ...props }, ref) => (
+  <TooltipPrimitive.Content
+    ref={ref}
+    sideOffset={sideOffset}
+    className={cn(
+      "z-50 overflow-hidden rounded-md border border-white/10 bg-[#111111] px-3 py-1.5 text-xs text-white shadow-md",
+      className,
+    )}
+    {...props}
+  />
+));
+TooltipContent.displayName = TooltipPrimitive.Content.displayName;
+
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: "default" | "ghost";
+  size?: "default" | "icon";
+}
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant = "default", size = "default", ...props }, ref) => {
+    const variantClasses = {
+      default: "bg-[#B91C1C] hover:bg-[#991818] text-white",
+      ghost: "bg-transparent hover:bg-white/5",
+    };
+    const sizeClasses = {
+      default: "h-10 px-4 py-2",
+      icon: "h-8 w-8 rounded-full aspect-[1/1]",
+    };
+    return (
+      <button
+        ref={ref}
+        className={cn(
+          "inline-flex items-center justify-center font-medium transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
+          variantClasses[variant],
+          sizeClasses[size],
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+Button.displayName = "Button";
+
+interface PromptInputBoxProps {
+  onSend?: (message: string, files?: File[]) => void;
+  isLoading?: boolean;
+  placeholder?: string;
+  className?: string;
+}
+
+export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxProps>(
+  ({ onSend = () => {}, isLoading = false, placeholder = "Say something...", className }, ref) => {
+    const [input, setInput] = React.useState("");
+    const [files, setFiles] = React.useState<File[]>([]);
+    const [previews, setPreviews] = React.useState<Record<string, string>>({});
+    const uploadInputRef = React.useRef<HTMLInputElement>(null);
+    const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+    React.useEffect(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 240)}px`;
+    }, [input]);
+
+    const processFile = (file: File) => {
+      if (!file.type.startsWith("image/")) return;
+      if (file.size > 10 * 1024 * 1024) return;
+      setFiles([file]);
+      const reader = new FileReader();
+      reader.onload = (e) =>
+        setPreviews({ [file.name]: e.target?.result as string });
+      reader.readAsDataURL(file);
+    };
+
+    const handleSubmit = () => {
+      if (isLoading) return;
+      const text = input.trim();
+      if (!text && files.length === 0) return;
+      onSend(text, files);
+      setInput("");
+      setFiles([]);
+      setPreviews({});
+    };
+
+    const hasContent = input.trim() !== "" || files.length > 0;
+
+    return (
+      <TooltipProvider>
+        <div
+          ref={ref}
+          className={cn(
+            "rounded-2xl border border-white/10 bg-[#0a0a0a] p-2 shadow-[0_8px_30px_rgba(0,0,0,0.4)] transition-colors",
+            isLoading && "border-[#B91C1C]/70",
+            className,
+          )}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/"));
+            if (f) processFile(f);
+          }}
+        >
+          {files.length > 0 && (
+            <div className="flex flex-wrap gap-2 pb-2">
+              {files.map((file) => {
+                const src = previews[file.name];
+                if (!src) return null;
+                return (
+                  <div key={file.name} className="relative">
+                    <div className="w-16 h-16 rounded-xl overflow-hidden">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={src} alt={file.name} className="h-full w-full object-cover" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFiles([]);
+                        setPreviews({});
+                      }}
+                      className="absolute top-1 right-1 rounded-full bg-black/70 p-0.5"
+                      aria-label="Remove image"
+                    >
+                      <X className="h-3 w-3 text-white" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+            placeholder={placeholder}
+            disabled={isLoading}
+          />
+
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => uploadInputRef.current?.click()}
+                    className="flex h-8 w-8 text-white/30 items-center justify-center rounded-full transition-colors hover:bg-white/5 hover:text-white/60"
+                    disabled={isLoading}
+                    aria-label="Attach image"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                    <input
+                      ref={uploadInputRef}
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) processFile(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Attach image</TooltipContent>
+              </Tooltip>
+            </div>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="default"
+                  size="icon"
+                  onClick={handleSubmit}
+                  disabled={isLoading || !hasContent}
+                  aria-label={isLoading ? "Sending" : "Send"}
+                  className={cn(
+                    "h-8 w-8 rounded-full",
+                    !hasContent && "bg-transparent text-white/30 hover:text-white/60",
+                  )}
+                >
+                  {isLoading ? (
+                    <Square className="h-3 w-3 fill-white animate-pulse" />
+                  ) : (
+                    <ArrowUp className="h-4 w-4 text-white" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{isLoading ? "Sending" : "Send"}</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+      </TooltipProvider>
+    );
+  },
+);
+PromptInputBox.displayName = "PromptInputBox";
+
+// Unused exports kept for parity with the Sprint 8B reference signature.
+// They're not currently re-imported anywhere; this comment is a marker for
+// future use if the input box gets richer toolbars.
+export { StopCircle, Mic };

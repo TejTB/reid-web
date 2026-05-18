@@ -1,8 +1,13 @@
 import { z } from "zod";
 
+const dataUrlRegex = /^data:image\/(jpeg|png|webp|gif);base64,/;
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().min(1).max(8000),
+  images: z
+    .array(z.string().regex(dataUrlRegex, "image must be a base64 image data URL"))
+    .max(4)
+    .optional(),
 });
 
 export const reidRequestSchema = z.object({

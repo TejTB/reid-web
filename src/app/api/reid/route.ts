@@ -439,20 +439,71 @@ export async function POST(req: NextRequest) {
   // Legacy conversations table: keep writing the user turn so existing
   // history-loading code (chat page) continues to work during the migration.
   const lastMessage = messages[messages.length - 1];
+  // The messages.content column is plain text — it can't hold base64.
+  // When the user attached images, persist the text + "[image attached]"
+  // marker so chat history readers know an image was sent.
+  const lastMessageContentForPersist =
+    lastMessage?.role === "user" &&
+    lastMessage.images &&
+    lastMessage.images.length > 0
+      ? `${lastMessage.content} [image attached]`
+      : lastMessage?.content ?? "";
   if (lastMessage?.role === "user") {
-    await db
-      .from("conversations")
-      .insert({ user_id: userId, role: "user", content: lastMessage.content });
+    await db.from("conversations").insert({
+      user_id: userId,
+      role: "user",
+      content: lastMessageContentForPersist,
+    });
   }
 
   // ----- Build the system prompt with FOUNDER CONTEXT ------------------
   const reidContext = await getReidContext(db, userId);
   const systemPrompt = buildSystemPrompt(reidContext);
 
-  const upstreamMessages =
+  // Build the upstream Anthropic messages array. Only the LAST user message
+  // packs in optional images (older messages were persisted text-only). Local
+  // type alias keeps us off the SDK's deeply-nested type chain.
+  type AnthropicMessageParam = Parameters<
+    typeof anthropic.messages.stream
+  >[0]["messages"][number];
+  const sourceMessages =
     messages.length === 0
       ? [{ role: "user" as const, content: "Begin." }]
       : messages;
+  const upstreamMessages: AnthropicMessageParam[] = sourceMessages.map(
+    (m, i) => {
+      const isLast = i === sourceMessages.length - 1;
+      if (
+        isLast &&
+        m.role === "user" &&
+        "images" in m &&
+        m.images &&
+        m.images.length > 0
+      ) {
+        const imageBlocks = m.images.map((dataUrl) => {
+          const [header, data] = dataUrl.split(",");
+          const mediaType = header.slice("data:".length).split(";")[0] as
+            | "image/jpeg"
+            | "image/png"
+            | "image/webp"
+            | "image/gif";
+          return {
+            type: "image" as const,
+            source: {
+              type: "base64" as const,
+              media_type: mediaType,
+              data,
+            },
+          };
+        });
+        return {
+          role: "user" as const,
+          content: [...imageBlocks, { type: "text" as const, text: m.content }],
+        };
+      }
+      return { role: m.role, content: m.content };
+    },
+  );
 
   const aStream = anthropic.messages.stream({
     model: REID_MODEL,
@@ -509,7 +560,7 @@ export async function POST(req: NextRequest) {
           if (lastMessage?.role === "user") {
             newTurnMessages.push({
               role: "user",
-              content: lastMessage.content,
+              content: lastMessageContentForPersist,
             });
           }
           newTurnMessages.push({
@@ -601,6 +652,22 @@ export async function POST(req: NextRequest) {
                 })
                 .eq("id", resolvedSessionId);
             }
+          }
+
+          // Emit the trailing REID_ACTIONS marker so the client can render
+          // action notifications (observation/goal/task). The unique
+          // \x1e (record-separator) prefix keeps it distinct from any text
+          // Reid might ever produce; the client splits on this marker after
+          // stream end. Skip the marker entirely when there are no actions
+          // so the existing reader path is untouched.
+          const actionTypes: string[] = [];
+          if (parsed.observations.length > 0)
+            actionTypes.push("observation_created");
+          if (parsed.goalUpdates.length > 0) actionTypes.push("goal_updated");
+          if (parsed.sessionComplete) actionTypes.push("task_assigned");
+          if (actionTypes.length > 0 && !closed) {
+            const marker = `\x1eREID_ACTIONS:${JSON.stringify(actionTypes)}\n`;
+            controller.enqueue(encoder.encode(marker));
           }
         } catch {
           // Already delivered to the client; persistence is best-effort.
