@@ -14,6 +14,7 @@ import LogoMark from "./LogoMark";
 import NavItem from "./NavItem";
 import SettingsModal from "./SettingsModal";
 import PaywallModal from "./PaywallModal";
+import { UserDropdown } from "./UserDropdown";
 import { useMe } from "./AuthProvider";
 
 const NAV = [
@@ -43,6 +44,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     me?.name?.trim() ||
     (me?.email ? me.email.split("@")[0] : null);
   const initial = name?.charAt(0).toUpperCase() ?? "·";
+  const isPro = me?.subscription_status === "pro";
+
+  function openSettingsModal() {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("reid:open-settings"));
+  }
+  function openPaywall() {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("reid:open-paywall", {
+        detail: { context: "default" },
+      }),
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-dark">
@@ -103,39 +118,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        {/* Identity chip: avatar initial + name. The previous decorative green
-            "online" dot was removed — it had no real wiring (no presence
-            channel, no realtime subscription) so it was misrepresenting
-            state. The name is sourced from public.users.name, falling back to
-            the local-part of the email. Identity row hides when neither name
-            nor email is available. */}
+        {/* Account dropdown: replaces the static identity chip. Surfaces user
+            identity + Settings (existing SettingsModal), Upgrade to Pro
+            (or "Reid Pro" badge for Pro users), and Log out. Triggers the
+            same global events the rest of the app already dispatches. */}
         {name && (
           <div
-            className="flex items-center gap-3"
             style={{
-              padding: "16px 22px",
+              padding: "10px 12px",
               borderTop: "1px solid rgba(242,237,232,0.06)",
             }}
           >
-            <div
-              className="rounded-full flex items-center justify-center"
-              style={{
-                width: 28,
-                height: 28,
-                background: "rgba(255,255,255,0.08)",
-                fontFamily: "var(--font-sans), sans-serif",
-                fontSize: 12,
-                color: "#C8D5E3",
+            <UserDropdown
+              user={{
+                name,
+                email: me?.email ?? null,
+                initials: initial,
+                is_pro: isPro,
               }}
-            >
-              {initial}
-            </div>
-            <span
-              className="font-sans truncate"
-              style={{ fontSize: 13, color: "#7A90A8" }}
-            >
-              {name}
-            </span>
+              onOpenSettings={openSettingsModal}
+              onUpgrade={openPaywall}
+            />
           </div>
         )}
       </aside>

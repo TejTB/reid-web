@@ -136,9 +136,14 @@ export default function VoiceButton({
           handleRef.current = null;
           setState("idle");
           if (preview && !isPro && typeof window !== "undefined") {
-            // Free preview finished — escalate to the upgrade modal. The
-            // PaywallModal listens for this event globally.
-            window.dispatchEvent(new CustomEvent("reid:open-paywall"));
+            // Free preview finished — escalate to the upgrade modal with the
+            // voice context so the headline reads "Voice is Reid Pro." rather
+            // than the generic default copy.
+            window.dispatchEvent(
+              new CustomEvent("reid:open-paywall", {
+                detail: { context: "voice" },
+              }),
+            );
           }
         },
       });
@@ -156,10 +161,16 @@ export default function VoiceButton({
         return;
       }
       if (result.reason === "forbidden") {
-        // /api/tts says Pro required. Trigger the upgrade modal.
+        // /api/tts says Pro required. Trigger the upgrade modal with the
+        // voice context — the user just tried to use voice, so the headline
+        // should reflect that.
         setState("idle");
         if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("reid:open-paywall"));
+          window.dispatchEvent(
+            new CustomEvent("reid:open-paywall", {
+              detail: { context: "voice" },
+            }),
+          );
         }
         return;
       }

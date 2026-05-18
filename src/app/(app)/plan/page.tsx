@@ -172,21 +172,8 @@ export default function PlanPage() {
       style={{ paddingTop: 56, paddingBottom: 40 }}
     >
       <header style={{ marginBottom: 48 }}>
-        <h1
-          className="font-serif text-text-primary"
-          style={{
-            fontSize: 38,
-            fontWeight: 500,
-            letterSpacing: "-0.025em",
-            lineHeight: 1.1,
-          }}
-        >
-          Your Plan
-        </h1>
-        <p
-          className="font-sans"
-          style={{ color: "#7A90A8", fontSize: 15, marginTop: 8 }}
-        >
+        <h1 className="font-serif text-3xl text-white mb-1">Your Plan</h1>
+        <p className="text-white/30 text-sm font-sans">
           Built session by session.
         </p>
       </header>

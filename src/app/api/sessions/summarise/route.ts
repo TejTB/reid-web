@@ -76,6 +76,21 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true, skipped: "already_summarised" });
   }
 
+  // Pre-fetch the user's onboarding_summary so we can short-circuit after
+  // generation if the model produced a copy of the starting point — a common
+  // failure mode for abandoned early sessions where the founder didn't push
+  // the conversation far enough to differ from what they said at onboarding.
+  // Persisting the duplicate would clutter the Plan timeline.
+  const { data: startingPointRow } = await db
+    .from("users")
+    .select("onboarding_summary")
+    .eq("id", userId)
+    .maybeSingle();
+  const startingPoint =
+    typeof startingPointRow?.onboarding_summary === "string"
+      ? startingPointRow.onboarding_summary.trim().toLowerCase()
+      : "";
+
   const { data: messageRows } = await db
     .from("messages")
     .select("role, content")
@@ -125,6 +140,19 @@ export async function POST(req: NextRequest) {
   const summary = summaryText.trim();
   if (!summary) {
     return Response.json({ ok: true, skipped: "empty_response" });
+  }
+
+  // Drop summaries that are functionally identical to the starting point —
+  // the Plan timeline already shows the onboarding summary as STARTING POINT
+  // and a verbatim echo at SESSION 2 reads as a bug to the user.
+  if (
+    startingPoint.length > 0 &&
+    summary.trim().toLowerCase() === startingPoint
+  ) {
+    return Response.json({
+      ok: true,
+      skipped: "duplicate_of_starting_point",
+    });
   }
 
   await endSession(db, sessionId, {

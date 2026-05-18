@@ -6,7 +6,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Mic } from "lucide-react";
 import ChatStream from "@/components/ChatStream";
 import LogoMark from "@/components/LogoMark";
-import VoiceButton from "@/components/VoiceButton";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
 import { streamReid, DailyLimitError, SessionLimitError } from "@/lib/reid";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
@@ -19,6 +18,18 @@ import { GlowCard } from "@/components/ui/glow-card";
 import { ShiningText } from "@/components/ui/shining-text";
 import type { Message } from "@/types/chat";
 import type { Message as DbMessage, Session as DbSession } from "@/types/db";
+
+// Context-aware dispatcher for the global PaywallModal. The modal reads
+// `detail.context` to pick the right copy: voice gate → "Voice is Reid Pro.",
+// session cap → "That's your N sessions.", everything else → the default
+// pricing copy. Centralised here so every trigger in /chat is consistent.
+type PaywallContext = "voice" | "session_limit" | "default";
+function openPaywall(context: PaywallContext) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("reid:open-paywall", { detail: { context } }),
+  );
+}
 
 // Action-card config: maps the server's REID_ACTIONS trailer types to the
 // label + destination + accent the chat page renders after a streamed turn.
@@ -217,9 +228,7 @@ export default function ChatPage() {
         // rolls back the optimistic user turn. No retry — the free quota is
         // exhausted and a retry would 402 again.
         if (err instanceof SessionLimitError) {
-          if (typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent("reid:open-paywall"));
-          }
+          openPaywall("session_limit");
           setMessages((prev) => prev.slice(0, -1));
           setStreamingText("");
           return {
@@ -232,9 +241,7 @@ export default function ChatPage() {
         // rolls back the optimistic user turn — no retry, no "Give me a
         // moment" placeholder.
         if (err instanceof DailyLimitError) {
-          if (typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent("reid:open-paywall"));
-          }
+          openPaywall("session_limit");
           setMessages((prev) => prev.slice(0, -1));
           setStreamingText("");
           return {
@@ -268,9 +275,7 @@ export default function ChatPage() {
             retryErr instanceof DailyLimitError ||
             retryErr instanceof SessionLimitError
           ) {
-            if (typeof window !== "undefined") {
-              window.dispatchEvent(new CustomEvent("reid:open-paywall"));
-            }
+            openPaywall("session_limit");
           }
           return { ok: false, text: "", sessionId: resolvedSessionId };
         }
@@ -421,8 +426,7 @@ export default function ChatPage() {
   // ---- Voice mode handlers ------------------------------------------------
   // The mic toggle starts a one-shot SpeechRecognition session, transcribes
   // the user's speech, and routes the transcript through handleSend. For Pro
-  // users in voice mode we then auto-play Reid's reply via fetchAndPlay —
-  // same path the manual VoiceButton uses.
+  // users in voice mode we then auto-play Reid's reply via fetchAndPlay.
 
   // Stop any active recognition / TTS when voice mode is dismissed.
   useEffect(() => {
@@ -539,8 +543,8 @@ export default function ChatPage() {
 
   // After a streamed turn finishes in voice mode for a Pro user, auto-play
   // the assistant message via /api/tts. Free users in voice mode get the
-  // thinking → idle transition without playback (consistent with the
-  // VoiceButton free-preview gating).
+  // thinking → idle transition without playback — voice playback is gated
+  // on Pro everywhere in /chat.
   const latestAssistantContent = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "assistant") return messages[i].content;
@@ -587,15 +591,17 @@ export default function ChatPage() {
     ? `Last session: ${formatLastSession(lastSessionAt)}`
     : "First session.";
 
-  // VoiceButton needs the latest finalised Reid message (not the in-flight
-  // streamingText, which would re-trigger TTS on every chunk for Pro users).
-  // Falls back to "" so the button renders disabled until Reid speaks.
-  const latestReidMessage = (() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "assistant") return messages[i].content;
+  // Mic button gate: free users hit the voice paywall; Pro users enter voice
+  // mode immediately. The PromptInputBox renders a mic icon whenever its
+  // input is empty and onMicClick is set, so this is the single entry point
+  // for voice from the input bar.
+  const handleMicClick = useCallback(() => {
+    if (!isPro) {
+      openPaywall("voice");
+      return;
     }
-    return "";
-  })();
+    setVoiceMode(true);
+  }, [isPro]);
 
   const emptyState = (
     <div className="flex flex-col items-center text-center px-6">
@@ -714,27 +720,6 @@ export default function ChatPage() {
               </span>
             );
           })()}
-          {speechSupported && (
-            <button
-              type="button"
-              onClick={() => setVoiceMode((v) => !v)}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs transition-all",
-                voiceMode
-                  ? "border-white/40 text-white bg-white/5"
-                  : "border-white/10 text-white/30 hover:text-white/50",
-              )}
-              aria-pressed={voiceMode}
-              aria-label={voiceMode ? "Switch to text" : "Switch to voice"}
-            >
-              {voiceMode ? <span>Voice on</span> : <span>Voice</span>}
-            </button>
-          )}
-          <VoiceButton
-            latestReidMessage={latestReidMessage}
-            isPro={isPro}
-            isStreaming={isStreaming}
-          />
         </div>
       </header>
       {bootstrapError ? (
@@ -786,6 +771,7 @@ export default function ChatPage() {
           isStreaming={isStreaming}
           emptyState={emptyState}
           headerSlot={headerSlot}
+          suppressThinking={voiceMode}
         />
       )}
       {/* Post-stream action notification cards. Rendered between the chat
@@ -884,7 +870,9 @@ export default function ChatPage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
+                        className="flex items-center gap-2"
                       >
+                        <span className="inline-block h-2 w-2 rounded-full bg-[#B91C1C] animate-pulse" />
                         <ShiningText text="thinking." />
                       </motion.div>
                     ) : voiceState === "listening" ? (
@@ -956,6 +944,12 @@ export default function ChatPage() {
                     onSend={handleSend}
                     isLoading={isStreaming || !loaded}
                     placeholder="Say something..."
+                    onMicClick={speechSupported ? handleMicClick : undefined}
+                    inlineBadge={
+                      !isPro && speechSupported ? (
+                        <ShiningText text="PRO" />
+                      ) : undefined
+                    }
                   />
                 </motion.div>
               )}

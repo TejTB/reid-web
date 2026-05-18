@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import LogoMark from "@/components/LogoMark";
 import { useAuth } from "@/components/AuthProvider";
 import { signInWithMagicLink } from "@/lib/session";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // Map raw Supabase error messages to Reid-voiced one-liners. Anything we
 // don't explicitly recognise falls through to the generic copy and gets
@@ -38,6 +39,11 @@ function LoginInner() {
   const [sentEmail, setSentEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Soft requirement for the public launch — we display the acceptance and
+  // capture it client-side, but the form is not blocked on the checkbox.
+  // Email-based auth means new users will see this on every sign-in attempt
+  // and we'd rather have them in the funnel than fight a checkbox.
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
     if (!loading && session) {
@@ -204,6 +210,34 @@ function LoginInner() {
                     {errorMsg}
                   </p>
                 )}
+                <div className="flex items-start gap-3 pt-1">
+                  <Checkbox
+                    checked={agreedToTerms}
+                    onCheckedChange={(v) => setAgreedToTerms(v === true)}
+                    aria-label="I agree to the Terms and Privacy Policy"
+                  />
+                  <span className="text-white/40 text-xs font-sans leading-relaxed text-left">
+                    I agree to the{" "}
+                    <a
+                      href="/terms"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-white/60 hover:text-white underline transition-colors"
+                    >
+                      Terms
+                    </a>{" "}
+                    and{" "}
+                    <a
+                      href="/privacy"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-white/60 hover:text-white underline transition-colors"
+                    >
+                      Privacy Policy
+                    </a>
+                    .
+                  </span>
+                </div>
                 <button
                   type="submit"
                   disabled={disabled}

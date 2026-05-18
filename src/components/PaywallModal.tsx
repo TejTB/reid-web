@@ -1,22 +1,55 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { FREE_SESSIONS } from "@/lib/session";
-import { PLAN_ANNUAL, PLAN_MONTHLY, type PlanInterval } from "@/lib/stripe-public";
+import { type PlanInterval } from "@/lib/stripe-public";
 import { GlowCard } from "@/components/ui/glow-card";
+import { PricingCards } from "@/components/ui/pricing-cards";
 
 // Globally mounted modal that opens when anything dispatches the
-// `reid:open-paywall` CustomEvent. The chat page fires it when /api/reid
-// returns 429 daily_limit_exceeded; SettingsModal's Upgrade button fires it
-// directly.
+// `reid:open-paywall` CustomEvent. Three callers, three copy variants:
+//   - chat page mic button → detail.context === 'voice'
+//   - chat page session/daily limit → detail.context === 'session_limit'
+//   - sidebar UserDropdown / SettingsModal upgrade → detail.context === 'default'
+// Anything that dispatches without a detail.context falls back to 'default'.
 //
-// Picking a plan POSTs /api/stripe/checkout and navigates to the returned
-// Checkout URL. While that round-trip is in flight we lock both buttons so
-// the user cannot double-spend.
+// Selecting a plan POSTs /api/stripe/checkout and navigates to the returned
+// Checkout URL. The PricingCards buttons disable while that round-trip is in
+// flight so the user cannot double-spend.
+
+type PaywallContext = "voice" | "session_limit" | "default";
+
+const COPY: Record<PaywallContext, { headline: string; sub: string }> = {
+  voice: {
+    headline: "Voice is Reid Pro.",
+    sub: "Speak to your co-founder. He speaks back.",
+  },
+  session_limit: {
+    headline: `That's your ${FREE_SESSIONS} sessions.`,
+    sub: "Reid Pro removes the limit — and I remember everything.",
+  },
+  default: {
+    headline: "Reid Pro.",
+    sub: "Unlimited sessions. His voice. Every observation.",
+  },
+};
+
+const FEATURES = [
+  "Unlimited sessions",
+  "Voice — speak and listen",
+  "Every observation Reid makes",
+] as const;
+
+function isPaywallContext(v: unknown): v is PaywallContext {
+  return v === "voice" || v === "session_limit" || v === "default";
+}
+
 export default function PaywallModal() {
   const [open, setOpen] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [pendingInterval, setPendingInterval] =
-    useState<PlanInterval | null>(null);
+  const [context, setContext] = useState<PaywallContext>("default");
+  const [pendingInterval, setPendingInterval] = useState<PlanInterval | null>(
+    null,
+  );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const close = useCallback(() => {
@@ -29,7 +62,11 @@ export default function PaywallModal() {
   }, []);
 
   useEffect(() => {
-    function onOpen() {
+    function onOpen(e: Event) {
+      const detail = (e as CustomEvent<{ context?: unknown }>).detail;
+      const nextContext =
+        detail && isPaywallContext(detail.context) ? detail.context : "default";
+      setContext(nextContext);
       setOpen(true);
     }
     window.addEventListener("reid:open-paywall", onOpen as EventListener);
@@ -83,16 +120,18 @@ export default function PaywallModal() {
 
   if (!open) return null;
 
+  const copy = COPY[context];
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="paywall-title"
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
       style={{
-        background: "rgba(0,0,0,0.6)",
-        backdropFilter: "blur(4px)",
-        WebkitBackdropFilter: "blur(4px)",
+        background: "rgba(0,0,0,0.65)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
         opacity: visible ? 1 : 0,
         transition: "opacity 200ms ease",
       }}
@@ -101,165 +140,57 @@ export default function PaywallModal() {
       }}
     >
       <div
-        className="home-card"
+        className="w-full max-w-md"
         style={{
-          width: "min(400px, calc(100vw - 32px))",
-          padding: 32,
           transform: visible ? "translateY(0)" : "translateY(8px)",
           opacity: visible ? 1 : 0,
           transition: "opacity 200ms ease, transform 200ms ease",
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2
-          id="paywall-title"
-          className="font-serif text-text-primary"
-          style={{
-            fontSize: 22,
-            fontWeight: 500,
-            marginBottom: 8,
-            letterSpacing: "-0.02em",
-          }}
-        >
-          That&apos;s your {FREE_SESSIONS} sessions. You&apos;ve had a start.
-        </h2>
-        <p
-          className="font-serif italic"
-          style={{
-            fontSize: 15,
-            color: "#C8D5E3",
-            marginBottom: 24,
-            lineHeight: 1.55,
-          }}
-        >
-          Reid Pro removes the limit — and I remember everything.
-        </p>
+        <GlowCard customSize glowColor="red" className="w-full">
+          <div className="bg-[#0a0a0a] rounded-2xl p-6">
+            <h2
+              id="paywall-title"
+              className="font-serif text-2xl text-white mb-1"
+            >
+              {copy.headline}
+            </h2>
+            <p className="text-white/40 text-sm italic font-serif mb-6">
+              {copy.sub}
+            </p>
 
-        <div className="flex flex-col" style={{ gap: 10 }}>
-          <PaywallChoice
-            plan={PLAN_MONTHLY}
-            pending={pendingInterval === "monthly"}
-            disabled={pendingInterval !== null}
-            onSelect={() => startCheckout("monthly")}
-          />
-          <PaywallChoice
-            plan={PLAN_ANNUAL}
-            highlight
-            pending={pendingInterval === "annual"}
-            disabled={pendingInterval !== null}
-            onSelect={() => startCheckout("annual")}
-          />
-        </div>
+            <PricingCards
+              onSelectMonthly={() => startCheckout("monthly")}
+              onSelectAnnual={() => startCheckout("annual")}
+              pending={pendingInterval}
+            />
 
-        {errorMsg && (
-          <p
-            className="font-sans"
-            style={{
-              fontSize: 13,
-              color: "#F87171",
-              marginTop: 14,
-            }}
-          >
-            {errorMsg}
-          </p>
-        )}
+            <div className="mt-5 space-y-1.5">
+              {FEATURES.map((f) => (
+                <div key={f} className="flex items-center gap-2">
+                  <div className="w-1 h-1 rounded-full bg-[#B91C1C]" />
+                  <span className="text-xs text-white/35 font-sans">{f}</span>
+                </div>
+              ))}
+            </div>
 
-        <button
-          type="button"
-          onClick={close}
-          className="font-sans"
-          style={{
-            marginTop: 18,
-            fontSize: 12,
-            color: "#7A90A8",
-            background: "transparent",
-            border: "none",
-            padding: 0,
-            cursor: "pointer",
-            textDecoration: "underline",
-          }}
-        >
-          Not now
-        </button>
+            {errorMsg && (
+              <p className="font-sans text-xs text-[#F87171] mt-4">
+                {errorMsg}
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={close}
+              className="mt-5 w-full text-center text-xs text-white/20 hover:text-white/50 transition-colors font-sans"
+            >
+              Not now
+            </button>
+          </div>
+        </GlowCard>
       </div>
     </div>
-  );
-}
-
-interface PaywallChoiceProps {
-  plan: { interval: PlanInterval; label: string; priceLabel: string; cadence: string; caption: string };
-  highlight?: boolean;
-  pending: boolean;
-  disabled: boolean;
-  onSelect: () => void;
-}
-
-function PaywallChoice({
-  plan,
-  highlight,
-  pending,
-  disabled,
-  onSelect,
-}: PaywallChoiceProps) {
-  return (
-    <GlowCard customSize glowColor="red" className="w-full">
-      <button
-        type="button"
-        onClick={onSelect}
-        disabled={disabled}
-        className="cta-shadow font-sans"
-        style={{
-          textAlign: "left",
-          padding: "16px 18px",
-          borderRadius: 9,
-          background: highlight ? "#B91C1C" : "rgba(255,255,255,0.04)",
-          border: highlight
-            ? "none"
-            : "1px solid rgba(255,255,255,0.08)",
-          color: "#F2EDE3",
-          cursor: disabled ? "default" : "pointer",
-          opacity: disabled && !pending ? 0.5 : 1,
-          transition: "opacity 200ms ease, transform 200ms ease",
-        }}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-baseline" style={{ gap: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 500 }}>{plan.label}</span>
-            <span
-              style={{
-                fontSize: 12,
-                color: highlight ? "rgba(255,255,255,0.7)" : "#7A90A8",
-              }}
-            >
-              {plan.caption}
-            </span>
-          </div>
-          <div className="flex items-baseline" style={{ gap: 6 }}>
-            <span style={{ fontSize: 18, fontWeight: 500 }}>
-              {plan.priceLabel}
-            </span>
-            <span
-              style={{
-                fontSize: 12,
-                color: highlight ? "rgba(255,255,255,0.7)" : "#7A90A8",
-              }}
-            >
-              {plan.cadence}
-            </span>
-          </div>
-        </div>
-        {pending && (
-          <p
-            style={{
-              marginTop: 8,
-              fontSize: 12,
-              color: highlight ? "rgba(255,255,255,0.85)" : "#C8D5E3",
-            }}
-          >
-            Opening checkout…
-          </p>
-        )}
-      </button>
-    </GlowCard>
   );
 }

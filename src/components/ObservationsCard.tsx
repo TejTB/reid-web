@@ -1,35 +1,45 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import GlassCard from "./GlassCard";
+import { GlowCard } from "@/components/ui/glow-card";
 import { supabase } from "@/lib/supabase";
-import { formatSessionDate } from "@/lib/format";
-import type { Observation, ObservationCategory } from "@/types/db";
+import type { Observation } from "@/types/db";
 
-// Home dashboard card surfacing the latest 3 observations Reid has logged.
-// Hidden entirely when there are none yet — empty-state lives on the
+// Home dashboard preview of the latest three observations Reid has logged.
+// Hides entirely when there are none yet — empty-state lives on the
 // /observations page, not here, so the home dashboard doesn't carry dead
-// surface area for new users. RLS scopes the read; this is a client fetch
-// using the user's anon JWT.
+// surface area for new users.
 //
-// Renders the new category-badge shape (avoidance / pattern / contradiction
-// / strength) for rows written by /api/observe. Legacy [OBSERVATION] rows
-// (confidence only) fall back to a neutral red left-border so they still
-// read as "noted by Reid" without inventing a category they don't have.
+// Visual DNA matches /observations: GlowCard wrapper, dark inner surface,
+// CategoryBadge in the four standard hues (avoidance / pattern /
+// contradiction / strength). Legacy [OBSERVATION] rows that arrived without
+// a category fall back to the avoidance badge so they still read as "noted
+// by Reid" without inventing a category they don't have.
 
-const CATEGORY_COLOURS: Record<ObservationCategory, string> = {
-  avoidance: "#B91C1C",
-  pattern: "#d97706",
-  contradiction: "#1d4ed8",
-  strength: "#16a34a",
+const CATEGORY_STYLES: Record<string, string> = {
+  avoidance: "bg-[#B91C1C]/15 text-[#f87171] border border-[#B91C1C]/25",
+  pattern: "bg-amber-900/20 text-amber-400 border border-amber-700/30",
+  contradiction:
+    "bg-purple-900/20 text-purple-400 border border-purple-700/30",
+  strength: "bg-green-900/20 text-green-400 border border-green-700/30",
 };
 
-const LEGACY_BORDER_COLOUR = "rgba(185,28,28,0.45)";
+function CategoryBadge({ category }: { category: string }) {
+  return (
+    <span
+      className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-sans ${
+        CATEGORY_STYLES[category] ?? CATEGORY_STYLES.avoidance
+      }`}
+    >
+      {category}
+    </span>
+  );
+}
 
-function borderColourFor(o: Observation): string {
-  if (o.category) return CATEGORY_COLOURS[o.category];
-  return LEGACY_BORDER_COLOUR;
+function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
 export default function ObservationsCard({ userId }: { userId: string }) {
@@ -60,67 +70,40 @@ export default function ObservationsCard({ userId }: { userId: string }) {
   if (observations.length === 0) return null;
 
   return (
-    <GlassCard title="WHAT REID NOTICED">
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
-      >
-        {observations.map((o) => (
-          <li
+    <div className="mt-4">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs text-white/30 uppercase tracking-widest font-sans">
+          What Reid Noticed
+        </span>
+        <Link
+          href="/observations"
+          className="text-xs text-white/25 hover:text-white/50 transition-colors font-sans"
+        >
+          See all →
+        </Link>
+      </div>
+      <div className="space-y-2">
+        {observations.slice(0, 3).map((o) => (
+          <GlowCard
             key={o.id}
-            className="flex flex-col"
-            style={{
-              gap: 4,
-              paddingLeft: 12,
-              borderLeft: `2px solid ${borderColourFor(o)}`,
-            }}
+            customSize
+            glowColor="red"
+            className="w-full"
           >
-            <p
-              className="font-serif italic text-text-primary"
-              style={{
-                fontSize: 15,
-                lineHeight: 1.5,
-                letterSpacing: "-0.005em",
-              }}
-            >
-              {o.text}
-            </p>
-            <span
-              className="font-sans"
-              style={{
-                fontSize: 11,
-                color: "#7A90A8",
-                letterSpacing: "0.04em",
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              {formatSessionDate(o.created_at)}
-            </span>
-          </li>
+            <div className="px-4 py-3 bg-[#111111] rounded-xl">
+              <div className="flex items-center justify-between mb-2">
+                <CategoryBadge category={o.category ?? "avoidance"} />
+                <span className="text-white/20 text-xs font-sans">
+                  {formatShortDate(o.created_at)}
+                </span>
+              </div>
+              <p className="text-white/65 text-sm font-serif italic leading-relaxed line-clamp-2 [text-wrap:pretty]">
+                {o.text}
+              </p>
+            </div>
+          </GlowCard>
         ))}
-      </ul>
-
-      <Link
-        href="/observations"
-        className="flex items-center font-sans"
-        style={{
-          marginTop: 18,
-          gap: 6,
-          fontSize: 12,
-          color: "#7A90A8",
-          letterSpacing: "0.04em",
-          transition: "color 150ms ease",
-        }}
-      >
-        <span>See all</span>
-        <ArrowRight size={12} strokeWidth={2} />
-      </Link>
-    </GlassCard>
+      </div>
+    </div>
   );
 }

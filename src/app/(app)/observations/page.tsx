@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
-import { CardCanvas, Card } from "@/components/ui/card-canvas";
+import { GlowCard } from "@/components/ui/glow-card";
 import { supabase } from "@/lib/supabase";
 import { triggerObserve } from "@/lib/observe-trigger";
 import type { Observation, ObservationCategory } from "@/types/db";
@@ -181,26 +181,10 @@ export default function ObservationsPage() {
         style={{ gap: 16, marginBottom: 32 }}
       >
         <div>
-          <h1
-            className="font-serif text-text-primary"
-            style={{
-              fontSize: 28,
-              fontWeight: 500,
-              letterSpacing: "-0.02em",
-              lineHeight: 1.15,
-              marginBottom: 8,
-            }}
-          >
+          <h1 className="font-serif text-3xl text-white mb-1">
             What Reid&apos;s noticed
           </h1>
-          <p
-            className="font-sans"
-            style={{
-              fontSize: 14,
-              color: "rgba(242,237,227,0.45)",
-              lineHeight: 1.6,
-            }}
-          >
+          <p className="text-white/30 text-sm font-sans">
             Patterns Reid keeps an eye on between sessions.
           </p>
         </div>
@@ -289,16 +273,16 @@ export default function ObservationsPage() {
           <p className="text-white/10 text-xs mt-2 font-sans">Have a few real sessions.</p>
         </div>
       ) : (
-        <CardCanvas className="block">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {observations.map((o, i) => (
-              <motion.div
-                key={o.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: Math.min(i, 6) * 0.04 }}
-              >
-                <Card category={o.category ?? "avoidance"} className="p-5 min-h-[140px]">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {observations.map((o, i) => (
+            <motion.div
+              key={o.id}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: Math.min(i, 6) * 0.04 }}
+            >
+              <GlowCard customSize glowColor="red" className="w-full">
+                <div className="p-5 min-h-[140px] bg-[#111111] rounded-xl">
                   <div className="flex items-start justify-between mb-3">
                     <CategoryBadge category={o.category ?? "avoidance"} />
                     <span className="text-white/25 text-xs font-sans">
@@ -308,11 +292,11 @@ export default function ObservationsPage() {
                   <p className="text-white/75 text-sm leading-relaxed font-serif italic [text-wrap:pretty]">
                     {o.text}
                   </p>
-                </Card>
-              </motion.div>
-            ))}
-          </div>
-        </CardCanvas>
+                </div>
+              </GlowCard>
+            </motion.div>
+          ))}
+        </div>
       )}
     </div>
   );

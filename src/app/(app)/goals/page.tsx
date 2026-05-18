@@ -199,21 +199,8 @@ export default function GoalsPage() {
       style={{ paddingTop: 56, paddingBottom: 48 }}
     >
       <header style={{ marginBottom: 40 }}>
-        <h1
-          className="font-serif text-text-primary"
-          style={{
-            fontSize: 38,
-            fontWeight: 500,
-            letterSpacing: "-0.025em",
-            lineHeight: 1.1,
-          }}
-        >
-          Your Goals
-        </h1>
-        <p
-          className="font-sans"
-          style={{ color: "#7A90A8", fontSize: 15, marginTop: 8 }}
-        >
+        <h1 className="font-serif text-3xl text-white mb-1">Your Goals</h1>
+        <p className="text-white/30 text-sm font-sans">
           The numbers Reid is helping you move.
         </p>
       </header>

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Check, CheckCircle } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { supabase } from "@/lib/supabase";
-import { CardCanvas, Card } from "@/components/ui/card-canvas";
+import { GlowCard } from "@/components/ui/glow-card";
 
 const MONTHS_SHORT = [
   "Jan",
@@ -182,25 +182,8 @@ export default function TasksPage() {
       style={{ paddingTop: 56, paddingBottom: 40 }}
     >
       <header>
-        <h1
-          className="font-serif text-text-primary"
-          style={{
-            fontSize: 38,
-            fontWeight: 500,
-            letterSpacing: "-0.025em",
-            lineHeight: 1.1,
-          }}
-        >
-          Tasks
-        </h1>
-        <p
-          className="font-sans"
-          style={{
-            color: "#7A90A8",
-            fontSize: 15,
-            marginTop: 8,
-          }}
-        >
+        <h1 className="font-serif text-3xl text-white mb-1">Tasks</h1>
+        <p className="text-white/30 text-sm font-sans">
           What Reid has asked you to do.
         </p>
         {loaded && tasks.length > 0 && (
@@ -273,23 +256,23 @@ export default function TasksPage() {
             </p>
           </div>
         ) : (
-          <CardCanvas>
-            <ul
-              className="flex flex-col"
-              style={{ gap: 12, listStyle: "none" }}
-            >
-              {tasks.map((t, i) => {
-                const done = !!doneMap[t.index];
-                return (
-                  <li
-                    key={t.index}
-                    className="animate-fade-up"
-                    style={{
-                      animationDelay: `${i * 60}ms`,
-                      opacity: done ? 0.6 : 1,
-                    }}
-                  >
-                    <Card className="p-0">
+          <ul
+            className="flex flex-col"
+            style={{ gap: 12, listStyle: "none" }}
+          >
+            {tasks.map((t, i) => {
+              const done = !!doneMap[t.index];
+              return (
+                <li
+                  key={t.index}
+                  className="animate-fade-up"
+                  style={{
+                    animationDelay: `${i * 60}ms`,
+                    opacity: done ? 0.6 : 1,
+                  }}
+                >
+                  <GlowCard customSize glowColor="red" className="w-full">
+                    <div className="bg-[#111111] rounded-xl">
                       <div
                         className="flex items-start"
                         style={{ padding: "18px 22px", gap: 16 }}
@@ -351,12 +334,12 @@ export default function TasksPage() {
                           </p>
                         </div>
                       </div>
-                    </Card>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardCanvas>
+                    </div>
+                  </GlowCard>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
 

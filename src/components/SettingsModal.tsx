@@ -93,7 +93,11 @@ export default function SettingsModal() {
       // We close the settings modal first so they're not stacked.
       close();
       if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("reid:open-paywall"));
+        window.dispatchEvent(
+          new CustomEvent("reid:open-paywall", {
+            detail: { context: "default" },
+          }),
+        );
       }
       return;
     }

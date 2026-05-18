@@ -190,15 +190,7 @@ export default function HomePage() {
         >
           {greeting()}, {greetName}.
         </h1>
-        <p
-          className="font-sans"
-          style={{
-            color: "#7A90A8",
-            fontSize: 16,
-            fontWeight: 300,
-            marginTop: 10,
-          }}
-        >
+        <p className="text-white/30 text-sm font-sans mt-2.5">
           Here&apos;s where things stand.
         </p>
         {sessionCount > 0 && streakText && (

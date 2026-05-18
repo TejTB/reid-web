@@ -74,10 +74,18 @@ interface PromptInputBoxProps {
   isLoading?: boolean;
   placeholder?: string;
   className?: string;
+  /** When the input is empty, the send button is replaced by a mic icon and
+   *  clicking it calls this handler instead of submitting. Used by /chat to
+   *  intercept the voice path through a Pro gate before recording starts. */
+  onMicClick?: () => void;
+  /** Renders a small badge slot to the left of the send/mic button. /chat
+   *  uses this to surface a ShiningText "PRO" badge next to the mic for
+   *  free users. */
+  inlineBadge?: React.ReactNode;
 }
 
 export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxProps>(
-  ({ onSend = () => {}, isLoading = false, placeholder = "Say something...", className }, ref) => {
+  ({ onSend = () => {}, isLoading = false, placeholder = "Say something...", className, onMicClick, inlineBadge }, ref) => {
     const [input, setInput] = React.useState("");
     const [files, setFiles] = React.useState<File[]>([]);
     const [previews, setPreviews] = React.useState<Record<string, string>>({});
@@ -203,28 +211,63 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
               </Tooltip>
             </div>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="default"
-                  size="icon"
-                  onClick={handleSubmit}
-                  disabled={isLoading || !hasContent}
-                  aria-label={isLoading ? "Sending" : "Send"}
-                  className={cn(
-                    "h-8 w-8 rounded-full",
-                    !hasContent && "bg-transparent text-white/30 hover:text-white/60",
-                  )}
-                >
-                  {isLoading ? (
-                    <Square className="h-3 w-3 fill-white animate-pulse" />
-                  ) : (
-                    <ArrowUp className="h-4 w-4 text-white" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">{isLoading ? "Sending" : "Send"}</TooltipContent>
-            </Tooltip>
+            <div className="flex items-center gap-2">
+              {inlineBadge && !hasContent && !isLoading && (
+                <span className="pointer-events-none select-none">
+                  {inlineBadge}
+                </span>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="default"
+                    size="icon"
+                    onClick={() => {
+                      if (isLoading) return;
+                      if (hasContent) {
+                        handleSubmit();
+                        return;
+                      }
+                      if (onMicClick) {
+                        onMicClick();
+                      }
+                    }}
+                    disabled={isLoading || (!hasContent && !onMicClick)}
+                    aria-label={
+                      isLoading
+                        ? "Sending"
+                        : hasContent
+                          ? "Send"
+                          : onMicClick
+                            ? "Speak to Reid"
+                            : "Send"
+                    }
+                    className={cn(
+                      "h-8 w-8 rounded-full",
+                      !hasContent &&
+                        "bg-transparent text-white/40 hover:text-white/80",
+                    )}
+                  >
+                    {isLoading ? (
+                      <Square className="h-3 w-3 fill-white animate-pulse" />
+                    ) : hasContent ? (
+                      <ArrowUp className="h-4 w-4 text-white" />
+                    ) : (
+                      <Mic className="h-4 w-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {isLoading
+                    ? "Sending"
+                    : hasContent
+                      ? "Send"
+                      : onMicClick
+                        ? "Speak to Reid"
+                        : "Send"}
+                </TooltipContent>
+              </Tooltip>
+            </div>
           </div>
         </div>
       </TooltipProvider>

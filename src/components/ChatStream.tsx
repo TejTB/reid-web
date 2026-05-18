@@ -12,6 +12,7 @@ export default function ChatStream({
   faded = false,
   emptyState,
   headerSlot,
+  suppressThinking = false,
 }: {
   messages: ChatMessage[];
   streamingText: string;
@@ -24,6 +25,10 @@ export default function ChatStream({
   /** Optional content rendered above the messages — used by /chat to render
    *  session dividers and prior-session history scoped to this stream. */
   headerSlot?: ReactNode;
+  /** When true, the red-dot + "thinking." indicator is hidden. Used by /chat
+   *  in voice mode where the mic surface owns the thinking state and we don't
+   *  want two indicators on screen at once. */
+  suppressThinking?: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -66,8 +71,8 @@ export default function ChatStream({
           return (
             <div key={key} className="animate-fade-up mb-8">
               <p
-                className="font-serif italic whitespace-pre-wrap max-w-[78%] [text-wrap:pretty]"
-                style={{ fontSize: 20, lineHeight: 1.75, color: "#F2EDE3" }}
+                className="font-serif italic whitespace-pre-wrap max-w-[78%] [text-wrap:pretty] text-lg"
+                style={{ lineHeight: 1.65, color: "#F2EDE3" }}
               >
                 {m.content}
               </p>
@@ -91,8 +96,8 @@ export default function ChatStream({
       {isStreaming && streamingText && (
         <div className="animate-fade-up mb-8">
           <p
-            className="font-serif italic whitespace-pre-wrap max-w-[78%] [text-wrap:pretty]"
-            style={{ fontSize: 20, lineHeight: 1.75, color: "#F2EDE3" }}
+            className="font-serif italic whitespace-pre-wrap max-w-[78%] [text-wrap:pretty] text-lg"
+            style={{ lineHeight: 1.65, color: "#F2EDE3" }}
           >
             {streamingText}
             <span className="inline-block w-[2px] h-[1em] align-middle ml-0.5 bg-accent animate-pulse" />
@@ -100,7 +105,7 @@ export default function ChatStream({
         </div>
       )}
 
-      {isStreaming && !streamingText && (
+      {isStreaming && !streamingText && !suppressThinking && (
         <div className="mb-8 flex items-center gap-2">
           <span className="inline-block h-2 w-2 rounded-full bg-[#B91C1C] animate-pulse" />
           <ShiningText text="thinking." />
