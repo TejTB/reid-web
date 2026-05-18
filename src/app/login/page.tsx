@@ -1,33 +1,14 @@
 "use client";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import LogoMark from "@/components/LogoMark";
 import { useAuth } from "@/components/AuthProvider";
-import { signInWithMagicLink } from "@/lib/session";
-import { Checkbox } from "@/components/ui/checkbox";
-
-// Map raw Supabase error messages to Reid-voiced one-liners. Anything we
-// don't explicitly recognise falls through to the generic copy and gets
-// logged so we can see the real shape during dev.
-function reidErrorFor(message: string): string {
-  const m = message.toLowerCase();
-  if (
-    m.includes("rate limit") ||
-    m.includes("over_email_send_rate_limit") ||
-    m.includes("429") ||
-    m.includes("too many")
-  ) {
-    return "Too many tries. Wait a minute, then try again.";
-  }
-  if (
-    m.includes("invalid login credentials") ||
-    m.includes("invalid email") ||
-    m.includes("invalid_email")
-  ) {
-    return "That email doesn't look right.";
-  }
-  return "Couldn't send the link. Try again.";
-}
+import {
+  signInWithPassword,
+  validateEmail,
+  validatePassword,
+} from "@/lib/session";
 
 function LoginInner() {
   const router = useRouter();
@@ -35,15 +16,9 @@ function LoginInner() {
   const next = search.get("next");
   const { session, loading } = useAuth();
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
-  const [sentEmail, setSentEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  // Soft requirement for the public launch — we display the acceptance and
-  // capture it client-side, but the form is not blocked on the checkbox.
-  // Email-based auth means new users will see this on every sign-in attempt
-  // and we'd rather have them in the funnel than fight a checkbox.
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
     if (!loading && session) {
@@ -54,24 +29,28 @@ function LoginInner() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (submitting) return;
-    const value = email.trim();
-    if (!value) return;
-    setSubmitting(true);
     setErrorMsg(null);
-    const { error } = await signInWithMagicLink(value, next);
-    setSubmitting(false);
-    if (error) {
-      // Log the raw message so we can refine the mapping later; the user
-      // only ever sees the Reid-voiced version.
-      console.error("[login] signInWithMagicLink error:", error.message);
-      setErrorMsg(reidErrorFor(error.message));
+    const emailErr = validateEmail(email);
+    if (emailErr) {
+      setErrorMsg(emailErr);
       return;
     }
-    setSentEmail(value);
-    setSent(true);
+    const pwErr = validatePassword(password);
+    if (pwErr) {
+      setErrorMsg(pwErr);
+      return;
+    }
+    setSubmitting(true);
+    const { error } = await signInWithPassword(email, password);
+    setSubmitting(false);
+    if (error) {
+      setErrorMsg(error.message);
+      return;
+    }
+    router.replace(next && next.startsWith("/") ? next : "/home");
   }
 
-  const disabled = submitting || !email.trim();
+  const disabled = submitting || !email.trim() || !password;
 
   return (
     <div className="min-h-screen bg-bg-dark flex flex-col items-center justify-center px-6">
@@ -103,211 +82,147 @@ function LoginInner() {
           className="w-full flex flex-col items-center login-body"
           style={{ marginTop: 22 }}
         >
-          {sent ? (
-            <div
-              key="sent"
-              className="w-full flex flex-col items-center login-fade-in"
-              style={{ maxWidth: 340, gap: 14, textAlign: "center" }}
+          <div
+            className="w-full flex flex-col items-center login-fade-in"
+            style={{ maxWidth: 340, gap: 18 }}
+          >
+            {/* Body copy */}
+            <p
+              className="font-serif italic text-text-primary text-center"
+              style={{
+                fontSize: 18,
+                lineHeight: 1.5,
+                maxWidth: 340,
+              }}
             >
-              <p
-                className="font-serif italic text-text-primary"
-                style={{ fontSize: 22, lineHeight: 1.4 }}
-              >
-                Check your email.
-              </p>
-              <p
-                className="font-sans"
-                style={{
-                  fontSize: 14,
-                  color: "#7A90A8",
-                  lineHeight: 1.6,
+              Welcome back.
+              <br />
+              Sign in to continue.
+            </p>
+
+            {/* Form */}
+            <form
+              onSubmit={handleSubmit}
+              noValidate
+              className="w-full flex flex-col"
+              style={{ gap: 12 }}
+            >
+              <input
+                id="email"
+                type="email"
+                required
+                autoComplete="email"
+                autoFocus
+                readOnly={submitting}
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (errorMsg) setErrorMsg(null);
                 }}
-              >
-                We sent a link to{" "}
-                <span style={{ color: "#C8D5E3" }}>{sentEmail}</span>. Open it
-                from this device and you&apos;re in.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setSent(false);
-                  setErrorMsg(null);
-                }}
-                className="font-sans"
+                placeholder="Email"
+                className="font-sans login-input"
                 style={{
-                  marginTop: 4,
-                  fontSize: 12,
-                  color: "#7A90A8",
                   background: "transparent",
-                  border: "none",
-                  padding: 0,
-                  cursor: "pointer",
-                  textDecoration: "underline",
+                  borderRadius: 9,
+                  padding: "0 14px",
+                  height: 48,
+                  fontSize: 15,
+                  color: "#F2EDE3",
+                  outline: "none",
+                  width: "100%",
                 }}
-              >
-                Use a different email
-              </button>
-            </div>
-          ) : (
-            <div
-              key="form"
-              className="w-full flex flex-col items-center login-fade-in"
-              style={{ maxWidth: 340, gap: 18 }}
-            >
-              {/* Body copy */}
-              <p
-                className="font-serif italic text-text-primary text-center"
+              />
+              <input
+                id="password"
+                type="password"
+                required
+                autoComplete="current-password"
+                minLength={12}
+                readOnly={submitting}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (errorMsg) setErrorMsg(null);
+                }}
+                placeholder="Password"
+                className="font-sans login-input"
                 style={{
-                  fontSize: 18,
-                  lineHeight: 1.5,
-                  maxWidth: 340,
+                  background: "transparent",
+                  borderRadius: 9,
+                  padding: "0 14px",
+                  height: 48,
+                  fontSize: 15,
+                  color: "#F2EDE3",
+                  outline: "none",
+                  width: "100%",
                 }}
-              >
-                Enter your email.
-                <br />
-                We&apos;ll send you a link.
-              </p>
-
-              {/* Form */}
-              <form
-                onSubmit={handleSubmit}
-                className="w-full flex flex-col"
-                style={{ gap: 12 }}
-              >
-                <input
-                  id="email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  autoFocus
-                  readOnly={submitting}
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    if (errorMsg) setErrorMsg(null);
-                  }}
-                  className="font-sans login-input"
+              />
+              {errorMsg && (
+                <p
+                  role="alert"
+                  className="font-sans login-error"
                   style={{
-                    background: "transparent",
-                    borderRadius: 9,
-                    padding: "0 14px",
-                    height: 48,
-                    fontSize: 15,
-                    color: "#F2EDE3",
-                    outline: "none",
-                    width: "100%",
-                  }}
-                />
-                {errorMsg && (
-                  <p
-                    className="font-sans login-error"
-                    style={{
-                      fontSize: 13,
-                      color: "#F87171",
-                      margin: 0,
-                    }}
-                  >
-                    {errorMsg}
-                  </p>
-                )}
-                <div className="flex items-start gap-3 pt-1">
-                  <Checkbox
-                    checked={agreedToTerms}
-                    onCheckedChange={(v) => setAgreedToTerms(v === true)}
-                    aria-label="I agree to the Terms and Privacy Policy"
-                  />
-                  <span className="text-white/40 text-xs font-sans leading-relaxed text-left">
-                    I agree to the{" "}
-                    <a
-                      href="/terms"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-white/60 hover:text-white underline transition-colors"
-                    >
-                      Terms
-                    </a>{" "}
-                    and{" "}
-                    <a
-                      href="/privacy"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-white/60 hover:text-white underline transition-colors"
-                    >
-                      Privacy Policy
-                    </a>
-                    .
-                  </span>
-                </div>
-                <button
-                  type="submit"
-                  disabled={disabled}
-                  className="cta-shadow flex items-center justify-center font-sans text-text-primary"
-                  style={{
-                    height: 46,
-                    borderRadius: 9,
                     fontSize: 13,
-                    fontWeight: 500,
-                    letterSpacing: "0.04em",
-                    background: "#B91C1C",
-                    border: "none",
-                    cursor: disabled ? "default" : "pointer",
-                    opacity: disabled ? 0.5 : 1,
-                    transition: "opacity 200ms ease, transform 200ms ease",
-                    width: "100%",
+                    color: "#F87171",
+                    margin: 0,
                   }}
                 >
-                  <span className={submitting ? "login-pulse" : undefined}>
-                    {submitting ? "Sending…" : "Send link →"}
-                  </span>
-                </button>
-              </form>
-
-              {/* Divider */}
-              <div
-                className="w-full flex items-center"
-                style={{ gap: 10, maxWidth: 340 }}
-              >
-                <div
-                  style={{
-                    flex: 1,
-                    height: 1,
-                    background: "rgba(58,80,112,0.5)",
-                  }}
-                />
-                <span
-                  className="font-sans"
-                  style={{
-                    fontSize: 12,
-                    color: "#3A5070",
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  or
-                </span>
-                <div
-                  style={{
-                    flex: 1,
-                    height: 1,
-                    background: "rgba(58,80,112,0.5)",
-                  }}
-                />
-              </div>
-
-              {/* Footer copy */}
-              <p
-                className="font-sans text-center"
+                  {errorMsg}
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={disabled}
+                className="cta-shadow flex items-center justify-center font-sans text-text-primary"
                 style={{
-                  fontSize: 12,
-                  color: "#7A90A8",
-                  lineHeight: 1.6,
-                  maxWidth: 340,
-                  margin: 0,
+                  height: 46,
+                  borderRadius: 9,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  letterSpacing: "0.04em",
+                  background: "#B91C1C",
+                  border: "none",
+                  cursor: disabled ? "default" : "pointer",
+                  opacity: disabled ? 0.5 : 1,
+                  transition: "opacity 200ms ease, transform 200ms ease",
+                  width: "100%",
                 }}
               >
-                New here? Same link. Your first session is free.
+                <span className={submitting ? "login-pulse" : undefined}>
+                  {submitting ? "Signing in…" : "Continue →"}
+                </span>
+              </button>
+            </form>
+
+            {/* Footer copy */}
+            <div
+              className="w-full flex flex-col items-center font-sans"
+              style={{
+                fontSize: 12,
+                color: "#7A90A8",
+                lineHeight: 1.6,
+                maxWidth: 340,
+                gap: 8,
+              }}
+            >
+              <p style={{ margin: 0 }}>
+                No account?{" "}
+                <Link
+                  href="/signup"
+                  style={{ color: "#C8D5E3", textDecoration: "underline" }}
+                >
+                  Create one
+                </Link>
               </p>
+              <Link
+                href="/forgot-password"
+                style={{ color: "#7A90A8" }}
+                className="hover:text-white"
+              >
+                Forgot password?
+              </Link>
             </div>
-          )}
+          </div>
         </div>
       </div>
 

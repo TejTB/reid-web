@@ -35,20 +35,90 @@ export async function getClientSession() {
   return data.session;
 }
 
-export async function signInWithMagicLink(
+export {
+  PASSWORD_MIN_LENGTH,
+  validateEmail,
+  validatePassword,
+} from "./validators";
+
+const GENERIC_LOGIN_ERROR =
+  "That's not right. Check your email and password.";
+
+export async function signInWithPassword(
   email: string,
-  next?: string | null,
+  password: string,
 ): Promise<{ error: { message: string } | null }> {
-  const redirectTo = (() => {
-    const base = `${window.location.origin}/auth/callback`;
-    if (!next) return base;
-    return `${base}?next=${encodeURIComponent(next)}`;
-  })();
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: redirectTo },
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        password,
+      }),
+    });
+    if (res.ok) return { error: null };
+    if (res.status === 429) {
+      const data = (await res.json().catch(() => ({}))) as {
+        retryAfter?: number;
+      };
+      const seconds = data.retryAfter ?? 60;
+      return {
+        error: {
+          message: `Too many tries. Wait ${seconds}s and try again.`,
+        },
+      };
+    }
+    return { error: { message: GENERIC_LOGIN_ERROR } };
+  } catch {
+    return { error: { message: GENERIC_LOGIN_ERROR } };
+  }
+}
+
+export async function signUpWithPassword(
+  email: string,
+  password: string,
+): Promise<{ error: { message: string } | null }> {
+  const redirectTo =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/auth/callback`
+      : undefined;
+  const { error } = await supabase.auth.signUp({
+    email: email.trim().toLowerCase(),
+    password,
+    options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
   });
-  return { error: error ? { message: error.message } : null };
+  if (error) {
+    console.error("[signUpWithPassword]", error.message);
+    return { error: { message: "Could not create account. Try again." } };
+  }
+  return { error: null };
+}
+
+export async function requestPasswordReset(
+  email: string,
+): Promise<{ error: null }> {
+  const redirectTo =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/auth/reset-password`
+      : undefined;
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    email.trim().toLowerCase(),
+    redirectTo ? { redirectTo } : undefined,
+  );
+  if (error) console.error("[requestPasswordReset]", error.message);
+  return { error: null };
+}
+
+export async function updatePassword(
+  password: string,
+): Promise<{ error: { message: string } | null }> {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) {
+    console.error("[updatePassword]", error.message);
+    return { error: { message: "Could not update password. Try again." } };
+  }
+  return { error: null };
 }
 
 export async function signOut(): Promise<void> {

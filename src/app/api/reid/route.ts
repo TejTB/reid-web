@@ -17,7 +17,7 @@ import {
   createGoalsFromOnboarding,
 } from "@/lib/session-server";
 import { reidRequestSchema } from "@/lib/validation";
-import { checkDailyMessageLimit } from "@/lib/ratelimit";
+import { checkDailyMessageLimit, checkReidMinuteLimit } from "@/lib/ratelimit";
 import { FREE_SESSIONS } from "@/lib/session-shared";
 
 // ----- SentinelStripper ---------------------------------------------------
@@ -430,6 +430,24 @@ export async function POST(req: NextRequest) {
         { status: 429 },
       );
     }
+  }
+
+  const minute = await checkReidMinuteLimit(userId);
+  if (!minute.allowed) {
+    return Response.json(
+      {
+        error: "rate_limit_exceeded",
+        retryAfter: minute.retryAfter,
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(minute.retryAfter),
+          "X-RateLimit-Limit": "8",
+          "X-RateLimit-Remaining": "0",
+        },
+      },
+    );
   }
 
   if (!sessionId) {

@@ -26,3 +26,36 @@ export async function checkDailyMessageLimit(userId: string) {
     used,
   };
 }
+
+/** 5 failed-or-attempted logins per email per 15 minutes. */
+export async function checkLoginRateLimit(emailLower: string): Promise<{
+  allowed: boolean;
+  retryAfter: number;
+}> {
+  const windowSec = 15 * 60;
+  const key = `reid:rl:login:${emailLower}`;
+  const used = await redis.incr(key);
+  if (used === 1) await redis.expire(key, windowSec);
+  if (used <= 5) return { allowed: true, retryAfter: 0 };
+  const ttl = await redis.ttl(key);
+  return { allowed: false, retryAfter: ttl > 0 ? ttl : windowSec };
+}
+
+export async function resetLoginRateLimit(emailLower: string): Promise<void> {
+  await redis.del(`reid:rl:login:${emailLower}`);
+}
+
+/** 8 Reid messages per user per 60s — burst protection on top of the
+ *  daily quota in checkDailyMessageLimit. */
+export async function checkReidMinuteLimit(userId: string): Promise<{
+  allowed: boolean;
+  retryAfter: number;
+}> {
+  const windowSec = 60;
+  const key = `reid:rl:minute:${userId}`;
+  const used = await redis.incr(key);
+  if (used === 1) await redis.expire(key, windowSec);
+  if (used <= 8) return { allowed: true, retryAfter: 0 };
+  const ttl = await redis.ttl(key);
+  return { allowed: false, retryAfter: ttl > 0 ? ttl : windowSec };
+}
