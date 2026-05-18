@@ -3,8 +3,12 @@ import { createServerClient } from "@supabase/ssr";
 
 const PUBLIC_PATHS = [
   "/login",
+  "/signup",
+  "/forgot-password",
   "/auth/callback",
+  "/auth/reset-password",
   "/auth/error",
+  "/api/auth/login",
   "/api/push/vapid",
   "/api/notifications/trigger",
   "/api/stripe/webhook",
@@ -15,6 +19,22 @@ function isPublicPath(pathname: string): boolean {
     if (pathname === p || pathname.startsWith(`${p}/`)) return true;
   }
   return false;
+}
+
+const ONBOARDING_PROTECTED_PREFIXES = [
+  "/home",
+  "/chat",
+  "/goals",
+  "/tasks",
+  "/observations",
+  "/plan",
+  "/settings",
+];
+
+function needsOnboardingCheck(pathname: string): boolean {
+  return ONBOARDING_PROTECTED_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
 }
 
 export async function proxy(request: NextRequest) {
@@ -68,6 +88,22 @@ export async function proxy(request: NextRequest) {
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
+  }
+
+  if (user && needsOnboardingCheck(pathname)) {
+    const { data: row, error: lookupError } = await supabase
+      .from("users")
+      .select("onboarding_complete")
+      .eq("auth_id", user.id)
+      .maybeSingle();
+    if (lookupError) {
+      console.warn("[proxy] onboarding lookup failed:", lookupError.message);
+    }
+    if (row && row.onboarding_complete === false) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/onboarding";
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;
