@@ -1,6 +1,6 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { Mic } from "lucide-react";
@@ -162,6 +162,14 @@ type SessionWithMessages = { session: DbSession; messages: DbMessage[] };
 
 export default function ChatPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Seed the composer input with `?prefill=` when present (used by the goals
+  // page "Tell Reid about another goal" CTA). Read once on mount; we never
+  // overwrite the user's typing after.
+  const prefillFromUrl = useMemo(() => {
+    const raw = searchParams?.get("prefill") ?? "";
+    return raw.trim().length > 0 ? raw : undefined;
+  }, [searchParams]);
   const { me, loading: authLoading } = useAuth();
   const isPro = useIsPro();
   const userId = me?.id ?? "";
@@ -1064,6 +1072,7 @@ export default function ChatPage() {
                     onSend={handleSend}
                     isLoading={isStreaming || !loaded}
                     placeholder="What's the situation?"
+                    initialValue={prefillFromUrl}
                     onMicClick={speechSupported ? handleMicClick : undefined}
                     inlineBadge={
                       !isPro && speechSupported ? (

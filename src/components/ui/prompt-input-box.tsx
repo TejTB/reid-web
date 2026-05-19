@@ -82,11 +82,15 @@ interface PromptInputBoxProps {
    *  uses this to surface a ShiningText "PRO" badge next to the mic for
    *  free users. */
   inlineBadge?: React.ReactNode;
+  /** When set, seeds the input on mount. Only applied once — subsequent
+   *  changes don't overwrite the user's typing. Used by the goals page to
+   *  pre-fill "I want to set a new goal: " via /chat?prefill=…. */
+  initialValue?: string;
 }
 
 export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxProps>(
-  ({ onSend = () => {}, isLoading = false, placeholder = "What's the situation?", className, onMicClick, inlineBadge }, ref) => {
-    const [input, setInput] = React.useState("");
+  ({ onSend = () => {}, isLoading = false, placeholder = "What's the situation?", className, onMicClick, inlineBadge, initialValue }, ref) => {
+    const [input, setInput] = React.useState(initialValue ?? "");
     const [files, setFiles] = React.useState<File[]>([]);
     const [previews, setPreviews] = React.useState<Record<string, string>>({});
     const [focused, setFocused] = React.useState(false);

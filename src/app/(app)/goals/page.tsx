@@ -8,13 +8,23 @@ import { useAuth } from "@/components/AuthProvider";
 import { getMyGoals } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import type { Goal } from "@/types/db";
-import LogoMark from "@/components/LogoMark";
 import { GlowCard } from "@/components/ui/glow-card";
 import { GoalRing } from "@/components/ui/goal-ring";
 import {
   FullScreenCard,
   type FullScreenGoalData,
 } from "@/components/ui/full-screen-card";
+
+const ADD_GOAL_PREFILL = "I want to set a new goal: ";
+
+function daysUntil(deadline: string | null): number | null {
+  if (!deadline) return null;
+  const d = new Date(deadline);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  const ms = d.getTime() - now.getTime();
+  return Math.ceil(ms / (24 * 60 * 60 * 1000));
+}
 
 const MONTHS_SHORT = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -247,43 +257,10 @@ export default function GoalsPage() {
         ) : (
           <div className="flex flex-col" style={{ gap: 32 }}>
             {primaryGoal && (
-              <motion.div
-                layoutId={`goal-${primaryGoal.id}`}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.45 }}
-                onClick={() => openGoal(primaryGoal)}
-                style={{ cursor: "pointer" }}
-              >
-                <GlowCard customSize glowColor="red" className="w-full">
-                  <div
-                    className="flex flex-col items-center"
-                    style={{ padding: 40, gap: 16 }}
-                  >
-                    <GoalRing
-                      currentValue={Number(primaryGoal.current_value ?? 0)}
-                      targetValue={Number(primaryGoal.target_value ?? 0)}
-                      unit={primaryGoal.unit ?? ""}
-                      unitPrefix={primaryGoal.unit_prefix ?? true}
-                      label={primaryGoal.title ?? ""}
-                      deadline={primaryGoal.deadline}
-                      size="lg"
-                    />
-                    <p
-                      className="font-sans"
-                      style={{
-                        fontSize: 12,
-                        color: "#7A90A8",
-                        letterSpacing: "0.04em",
-                        textTransform: "uppercase",
-                        marginTop: 8,
-                      }}
-                    >
-                      {Math.round(progressPct(primaryGoal))}% complete
-                    </p>
-                  </div>
-                </GlowCard>
-              </motion.div>
+              <PrimaryGoalCard
+                goal={primaryGoal}
+                onOpen={() => openGoal(primaryGoal)}
+              />
             )}
 
             {secondaryGoals.length > 0 && (
@@ -341,6 +318,7 @@ export default function GoalsPage() {
                 </motion.div>
               </>
             )}
+            <AddGoalButton />
           </div>
         )}
       </motion.div>
@@ -353,8 +331,145 @@ export default function GoalsPage() {
   );
 }
 
+function PrimaryGoalCard({
+  goal,
+  onOpen,
+}: {
+  goal: Goal;
+  onOpen: () => void;
+}) {
+  const pct = Math.round(progressPct(goal));
+  const current = formatGoalValue(
+    goal.current_value,
+    goal.unit,
+    goal.unit_prefix,
+  );
+  const target = formatGoalValue(
+    goal.target_value,
+    goal.unit,
+    goal.unit_prefix,
+  );
+  const deadlineText = formatDeadline(goal.deadline);
+  const daysLeft = daysUntil(goal.deadline);
+  const urgentDeadline = daysLeft !== null && daysLeft >= 0 && daysLeft < 14;
+
+  return (
+    <motion.div
+      layoutId={`goal-${goal.id}`}
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45 }}
+      onClick={onOpen}
+      style={{ cursor: "pointer" }}
+    >
+      <GlowCard customSize glowColor="red" className="w-full">
+        <div
+          style={{
+            padding: "32px 28px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 24,
+            boxShadow: "inset 0 0 0 1px rgba(185,28,28,0.16)",
+            borderRadius: 14,
+          }}
+        >
+          <div
+            className="flex flex-col md:flex-row md:items-center"
+            style={{ gap: 28 }}
+          >
+            <div className="flex-shrink-0 self-center md:self-auto">
+              <GoalRing
+                currentValue={Number(goal.current_value ?? 0)}
+                targetValue={Number(goal.target_value ?? 0)}
+                unit={goal.unit ?? ""}
+                unitPrefix={goal.unit_prefix ?? true}
+                label={goal.title ?? ""}
+                deadline={goal.deadline}
+                size="lg"
+                hideMeta
+              />
+            </div>
+            <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 10 }}>
+              <span
+                className="font-sans"
+                style={{
+                  fontSize: 9,
+                  fontWeight: 500,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "#B91C1C",
+                  alignSelf: "flex-start",
+                  background: "rgba(185,28,28,0.10)",
+                  padding: "3px 8px",
+                  borderRadius: 4,
+                }}
+              >
+                Primary goal
+              </span>
+              <h2
+                className="font-serif italic [text-wrap:pretty]"
+                style={{
+                  fontSize: 24,
+                  fontWeight: 500,
+                  color: "#F2EDE3",
+                  letterSpacing: "-0.01em",
+                  lineHeight: 1.2,
+                  margin: 0,
+                }}
+              >
+                {goal.title}
+              </h2>
+              <p
+                className="font-sans"
+                style={{
+                  fontSize: 14,
+                  color: "#C8D5E3",
+                  margin: 0,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {current} of {target}
+              </p>
+              <div className="flex items-center" style={{ gap: 10 }}>
+                {deadlineText && (
+                  <span
+                    className="font-sans"
+                    style={{
+                      fontSize: 12,
+                      color: urgentDeadline ? "#B91C1C" : "#7A90A8",
+                    }}
+                  >
+                    {urgentDeadline && daysLeft !== null
+                      ? `${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`
+                      : deadlineText}
+                  </span>
+                )}
+                <span
+                  className="font-sans"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 500,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    color: "#B91C1C",
+                    background: "rgba(185,28,28,0.15)",
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                  }}
+                >
+                  {pct}% complete
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </GlowCard>
+    </motion.div>
+  );
+}
+
 function GoalTile({ goal }: { goal: Goal }) {
-  const pct = progressPct(goal);
+  const pct = Math.round(progressPct(goal));
   const current = formatGoalValue(
     goal.current_value,
     goal.unit,
@@ -370,84 +485,89 @@ function GoalTile({ goal }: { goal: Goal }) {
     <GlowCard customSize glowColor="red" className="w-full">
       <div
         style={{
-          padding: "24px",
-          minHeight: 160,
+          padding: "20px",
+          minHeight: 120,
           borderRadius: 14,
           display: "flex",
-          flexDirection: "column",
-          gap: 16,
+          alignItems: "center",
+          gap: 18,
         }}
       >
-        <h3
-          className="[text-wrap:pretty]"
-          style={{
-            fontFamily: "'Playfair Display', serif",
-            fontStyle: "italic",
-            fontSize: 22,
-            color: "#F2EDE3",
-            lineHeight: 1.25,
-            margin: 0,
-            letterSpacing: "-0.01em",
-          }}
-        >
-          {goal.title}
-        </h3>
-        <div className="flex items-baseline" style={{ gap: 8 }}>
-          <span
-            className="font-sans"
+        <div className="flex-shrink-0">
+          <GoalRing
+            currentValue={Number(goal.current_value ?? 0)}
+            targetValue={Number(goal.target_value ?? 0)}
+            unit={goal.unit ?? ""}
+            unitPrefix={goal.unit_prefix ?? true}
+            label={goal.title ?? ""}
+            deadline={goal.deadline}
+            size="sm"
+            hideMeta
+          />
+        </div>
+        <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 6 }}>
+          <h3
+            className="[text-wrap:pretty]"
             style={{
-              fontSize: 24,
-              fontWeight: 600,
+              fontFamily: "'Playfair Display', serif",
+              fontStyle: "italic",
+              fontSize: 16,
               color: "#F2EDE3",
-              fontVariantNumeric: "tabular-nums",
+              lineHeight: 1.3,
+              margin: 0,
               letterSpacing: "-0.01em",
             }}
           >
-            {current}
-          </span>
-          <span
-            className="font-sans"
-            style={{
-              fontSize: 14,
-              fontWeight: 400,
-              color: "#7A90A8",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            / {target}
-          </span>
-        </div>
-        <div
-          style={{
-            height: 6,
-            width: "100%",
-            background: "rgba(255,255,255,0.06)",
-            borderRadius: 999,
-            overflow: "hidden",
-          }}
-        >
-          <motion.div
-            initial={{ width: 0 }}
-            animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.6, ease: "easeOut" }}
-            style={{ height: "100%", background: "#B91C1C" }}
-          />
-        </div>
-        {deadline && (
+            {goal.title}
+          </h3>
           <p
             className="font-sans"
             style={{
               fontSize: 12,
-              color: "#7A90A8",
-              letterSpacing: "0.02em",
+              color: "#C8D5E3",
               margin: 0,
+              fontVariantNumeric: "tabular-nums",
             }}
           >
-            {deadline}
+            {current} of {target} · {pct}%
           </p>
-        )}
+          {deadline && (
+            <p
+              className="font-sans"
+              style={{
+                fontSize: 11,
+                color: "#7A90A8",
+                letterSpacing: "0.02em",
+                margin: 0,
+              }}
+            >
+              {deadline}
+            </p>
+          )}
+        </div>
       </div>
     </GlowCard>
+  );
+}
+
+function AddGoalButton() {
+  return (
+    <Link
+      href={`/chat?prefill=${encodeURIComponent(ADD_GOAL_PREFILL)}`}
+      className="font-sans inline-flex items-center justify-center w-full transition-colors"
+      style={{
+        height: 48,
+        background: "transparent",
+        border: "1px solid rgba(255,255,255,0.10)",
+        borderRadius: 10,
+        color: "#7A90A8",
+        fontSize: 14,
+        letterSpacing: "0.02em",
+        cursor: "pointer",
+      }}
+    >
+      + Tell Reid about another goal
+    </Link>
   );
 }
 
@@ -455,36 +575,23 @@ function GoalsEmptyState() {
   return (
     <div
       className="flex flex-col items-center justify-center text-center animate-fade-up"
-      style={{ paddingTop: 64, paddingBottom: 80, gap: 24 }}
+      style={{ paddingTop: 96, paddingBottom: 80, gap: 24 }}
     >
-      <LogoMark size={64} glow={false} />
-      <div className="flex flex-col" style={{ gap: 8 }}>
-        <h2
-          className="font-serif italic"
-          style={{
-            fontSize: 32,
-            fontWeight: 400,
-            color: "#F2EDE3",
-            letterSpacing: "-0.02em",
-            lineHeight: 1.2,
-          }}
-        >
-          No goals yet.
-        </h2>
-        <p
-          className="font-sans"
-          style={{
-            fontSize: 16,
-            color: "#7A90A8",
-            lineHeight: 1.55,
-            maxWidth: 380,
-          }}
-        >
-          They&apos;ll appear after our first real session.
-        </p>
-      </div>
+      <p
+        className="font-serif italic [text-wrap:pretty]"
+        style={{
+          fontSize: 24,
+          fontWeight: 400,
+          color: "#7A90A8",
+          letterSpacing: "-0.01em",
+          lineHeight: 1.35,
+          maxWidth: 440,
+        }}
+      >
+        Reid doesn&apos;t know what you&apos;re building toward yet.
+      </p>
       <Link
-        href="/chat"
+        href={`/chat?prefill=${encodeURIComponent(ADD_GOAL_PREFILL)}`}
         className="cta-shadow inline-flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-text-primary transition-all duration-200 hover:-translate-y-px"
         style={{
           height: 48,
@@ -496,7 +603,7 @@ function GoalsEmptyState() {
           letterSpacing: "0.04em",
         }}
       >
-        <span>Open session</span>
+        <span>Open a session</span>
         <ArrowRight size={16} strokeWidth={2} />
       </Link>
     </div>
