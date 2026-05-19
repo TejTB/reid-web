@@ -24,6 +24,7 @@ import type {
   Observation,
   ObservationCategory,
 } from "@/types/db";
+import { observationBadge } from "@/lib/observation-badge";
 
 // Reid design tokens — colocated so the component is a single drop-in. Any
 // change to the system itself lives in tailwind config + globals.css; these
@@ -371,9 +372,14 @@ function TypeBadge({
   let fg: string;
   let label: string;
   if (type === "observation") {
-    bg = COLOR.badgeObservationBg;
-    fg = COLOR.badgeObservationFg;
-    label = observationCategoryLabel(observationCategory);
+    // Sprint 11: read from the shared observationBadge so the colour + label
+    // match the /observations list tile byte-for-byte. Before this commit
+    // the FullScreenCard always rendered #92400E amber regardless of
+    // category, so a "Contradiction" tile and its detail card disagreed.
+    const palette = observationBadge(observationCategory);
+    bg = palette.bg;
+    fg = palette.fg;
+    label = palette.label;
   } else if (type === "goal") {
     bg = COLOR.badgeGoalBg;
     fg = COLOR.badgeGoalFg;
@@ -401,17 +407,6 @@ function TypeBadge({
       {label}
     </span>
   );
-}
-
-function observationCategoryLabel(
-  category: ObservationCategory | string | null | undefined,
-): string {
-  const c = (category ?? "").toLowerCase();
-  if (c === "strength") return "Strength";
-  if (c === "contradiction") return "Contradiction";
-  if (c === "avoidance") return "Avoidance";
-  if (c === "pattern") return "Pattern";
-  return "Observation";
 }
 
 // ----------------------------------------------------------------------------

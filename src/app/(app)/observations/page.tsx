@@ -12,6 +12,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { triggerObserve } from "@/lib/observe-trigger";
 import type { Observation } from "@/types/db";
+import { observationBadge } from "@/lib/observation-badge";
 
 const MONTHS_SHORT = [
   "Jan",
@@ -38,31 +39,10 @@ function formatShortDate(iso: string | null | undefined): string {
 const OBSERVATION_SELECT =
   "id, user_id, session_id, text, confidence, category, created_at";
 
-type CategoryStyle = { bg: string; fg: string; label: string };
-
-function categoryStyle(
-  category: string | null,
-  confidence: string | null,
-): CategoryStyle {
-  const c = (category ?? "").toLowerCase();
-  if (c === "strength")
-    return { bg: "#14532D", fg: "#F2EDE3", label: "Strength" };
-  if (c === "pattern")
-    return { bg: "#92400E", fg: "#F2EDE3", label: "Pattern" };
-  if (c === "contradiction")
-    return { bg: "#B91C1C", fg: "#F2EDE3", label: "Contradiction" };
-  if (c === "avoidance")
-    return { bg: "#B91C1C", fg: "#F2EDE3", label: "Avoidance" };
-  if (confidence === "high")
-    return { bg: "#B91C1C", fg: "#F2EDE3", label: "Warning" };
-  if (confidence === "low")
-    return { bg: "#14532D", fg: "#F2EDE3", label: "Strength" };
-  return { bg: "#92400E", fg: "#F2EDE3", label: "Observation" };
-}
-
-function deriveHeadline(text: string, maxWords: number = 5): string {
-  const words = text.trim().split(/\s+/).slice(0, maxWords);
-  return words.join(" ").replace(/[.,;:!?]+$/, "") || text.slice(0, 40);
+function previewBody(text: string, max: number = 80): string {
+  const t = text.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max).trimEnd()}…`;
 }
 
 export default function ObservationsPage() {
@@ -330,30 +310,20 @@ export default function ObservationsPage() {
         ) : observations.length === 0 ? (
           <div
             className="flex flex-col items-center text-center"
-            style={{ paddingTop: 80, paddingBottom: 80, gap: 12 }}
+            style={{ paddingTop: 96, paddingBottom: 80, gap: 10 }}
           >
-            <h2
+            <p
               className="font-serif italic"
               style={{
-                fontSize: 32,
+                fontSize: 22,
                 fontWeight: 400,
-                color: "#F2EDE3",
-                letterSpacing: "-0.02em",
-                lineHeight: 1.2,
+                color: "#7A90A8",
+                letterSpacing: "-0.01em",
+                lineHeight: 1.35,
+                maxWidth: 360,
               }}
             >
               Reid&apos;s still watching.
-            </h2>
-            <p
-              className="font-sans"
-              style={{
-                fontSize: 15,
-                color: "#7A90A8",
-                lineHeight: 1.55,
-                maxWidth: 380,
-              }}
-            >
-              Patterns take time to surface. Come back after a few sessions.
             </p>
           </div>
         ) : (
@@ -395,18 +365,23 @@ export default function ObservationsPage() {
 }
 
 function ObservationTile({ observation }: { observation: Observation }) {
-  const style = categoryStyle(observation.category, observation.confidence);
-  const headline = deriveHeadline(observation.text);
+  const badge = observationBadge(observation.category);
+  const fullText = observation.text.trim();
+  const preview = previewBody(fullText, 80);
+  // Show the preview only when it materially differs from the title (i.e.
+  // the full text exceeded the 80-char preview cap). For short observations
+  // the title is the whole sentence and a duplicate preview is noise.
+  const showPreview = fullText.length > 80;
   return (
     <GlowCard customSize glowColor="red" className="w-full">
       <div
         style={{
-          padding: "22px 24px",
-          minHeight: 128,
+          padding: "20px 22px",
+          minHeight: 132,
           borderRadius: 14,
           display: "flex",
           flexDirection: "column",
-          gap: 16,
+          gap: 12,
         }}
       >
         <div
@@ -416,15 +391,16 @@ function ObservationTile({ observation }: { observation: Observation }) {
           <span
             className="font-sans uppercase tracking-wider"
             style={{
-              background: style.bg,
-              color: style.fg,
+              background: badge.bg,
+              color: badge.fg,
               padding: "4px 10px",
               borderRadius: 999,
-              fontSize: 11,
-              letterSpacing: "0.08em",
+              fontSize: 10,
+              fontWeight: 500,
+              letterSpacing: "0.1em",
             }}
           >
-            {style.label}
+            {badge.label}
           </span>
           <span
             className="font-sans"
@@ -436,14 +412,36 @@ function ObservationTile({ observation }: { observation: Observation }) {
         <h3
           className="font-serif italic [text-wrap:pretty]"
           style={{
-            fontSize: 20,
+            fontSize: 18,
             color: "#F2EDE3",
-            lineHeight: 1.3,
+            lineHeight: 1.35,
             margin: 0,
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            letterSpacing: "-0.005em",
           }}
         >
-          {headline}
+          {fullText}
         </h3>
+        {showPreview && (
+          <p
+            className="font-sans"
+            style={{
+              fontSize: 13,
+              color: "#7A90A8",
+              lineHeight: 1.5,
+              margin: 0,
+              display: "-webkit-box",
+              WebkitLineClamp: 1,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {preview}
+          </p>
+        )}
       </div>
     </GlowCard>
   );
