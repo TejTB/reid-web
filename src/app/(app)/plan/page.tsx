@@ -181,7 +181,7 @@ export default function PlanPage() {
       {error ? (
         <div className="flex flex-col items-center justify-center pt-24 gap-4">
           <p className="font-serif italic text-text-dim text-lg">
-            Something went wrong.
+            My end is jammed.
           </p>
           <button
             type="button"
