@@ -85,14 +85,17 @@ export async function signInWithPassword(
 export async function signUpWithPassword(
   email: string,
   password: string,
+  name?: string,
 ): Promise<{ error: { message: string } | null }> {
   try {
+    const cleanName = name?.trim() || undefined;
     const res = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         email: email.trim().toLowerCase(),
         password,
+        ...(cleanName ? { name: cleanName } : {}),
       }),
     });
     if (res.ok) {

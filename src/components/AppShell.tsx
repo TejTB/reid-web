@@ -19,6 +19,7 @@ import { useMe, useAuth } from "./AuthProvider";
 import { LocationTag } from "./ui/location-tag";
 import { FREE_SESSIONS } from "@/lib/session-shared";
 import { supabase } from "@/lib/supabase";
+import { isPlausibleFirstName } from "@/lib/reid-summary";
 
 const NAV = [
   { href: "/home", label: "Home", icon: Home },
@@ -41,9 +42,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     router.push("/settings");
   }
 
+  const storedName = me?.name?.trim() || null;
+  // Re-validate the stored name with isPlausibleFirstName so an existing
+  // "Almost" row (from before the extractor was hardened) never reaches the UI.
+  const validatedName =
+    storedName && isPlausibleFirstName(storedName) ? storedName : null;
   const name =
-    me?.name?.trim() ||
-    (me?.email ? me.email.split("@")[0] : null);
+    validatedName ?? (me?.email ? me.email.split("@")[0] : null);
   const initial = name?.charAt(0).toUpperCase() ?? "·";
   const isPro = me?.subscription_status === "pro";
 
