@@ -169,6 +169,15 @@ export default function ChatPage() {
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Opening line — Reid speaks first on /chat mount. While `openingState` is
+  // 'streaming' the page renders the deltas in the same bubble used for any
+  // streamed assistant reply (ChatStream reads `streamingText`). On 'done'
+  // the line is committed into `messages` so it persists into the first
+  // /api/reid payload as the seed assistant turn. On 'failed' the empty
+  // state takes over.
+  const [openingState, setOpeningState] = useState<
+    "idle" | "streaming" | "done" | "failed"
+  >("idle");
   // Reserved for future bootstrap-failure UI; auth/me load lives in
   // AuthProvider now, so the chat page itself has no early-failure surface.
   const bootstrapError = false;
@@ -284,6 +293,59 @@ export default function ChatPage() {
     [],
   );
 
+  // Fetches /api/reid/opening and pipes the response body into
+  // `streamingText` so ChatStream renders it as a live assistant bubble.
+  // On success the opening line is committed into `messages` so the first
+  // /api/reid POST naturally seeds the assistant turn into the session
+  // transcript. On 204 / empty body / network error the empty-state CTA
+  // takes over via the 'failed' branch.
+  const streamOpeningLine = useCallback(async () => {
+    setOpeningState("streaming");
+    setStreamingText("");
+    setIsStreaming(true);
+    let acc = "";
+    try {
+      const res = await fetch("/api/reid/opening", {
+        method: "POST",
+        cache: "no-store",
+      });
+      if (res.status === 204 || !res.ok || !res.body) {
+        setOpeningState("failed");
+        setIsStreaming(false);
+        setStreamingText("");
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        acc += decoder.decode(value, { stream: true });
+        setStreamingText(acc);
+      }
+      acc += decoder.decode();
+      const trimmed = acc.trim();
+      if (!trimmed) {
+        setOpeningState("failed");
+        setIsStreaming(false);
+        setStreamingText("");
+        return;
+      }
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: trimmed },
+      ]);
+      setStreamingText("");
+      setIsStreaming(false);
+      setOpeningState("done");
+    } catch {
+      setOpeningState("failed");
+      setIsStreaming(false);
+      setStreamingText("");
+    }
+  }, []);
+
   useEffect(() => {
     if (authLoading) return;
     if (initialized.current) return;
@@ -299,6 +361,7 @@ export default function ChatPage() {
       // messages. The onboarding session is excluded by virtue of the chat
       // session id being stored separately from the user id.
       const restored = getChatSessionId();
+      let restoredMessageCount = 0;
       if (restored) {
         setSessionId(restored);
         try {
@@ -313,12 +376,12 @@ export default function ChatPage() {
               (s) => s.session.id === restored,
             );
             if (current) {
-              setMessages(
-                current.messages.map((m) => ({
-                  role: m.role,
-                  content: m.content,
-                })),
-              );
+              const restoredMsgs = current.messages.map((m) => ({
+                role: m.role,
+                content: m.content,
+              }));
+              restoredMessageCount = restoredMsgs.length;
+              setMessages(restoredMsgs);
             }
           }
         } catch {
@@ -326,9 +389,22 @@ export default function ChatPage() {
         }
       }
 
-      setLoaded(true);
+      // Reid speaks first. Only when no prior turns are on screen — otherwise
+      // we'd inject a fresh opening on top of an in-progress conversation.
+      // Flipping `openingState` to 'streaming' BEFORE `loaded` keeps the
+      // skeleton up until ChatStream is ready to render the "thinking."
+      // indicator — no empty-state flash in the gap.
+      if (restoredMessageCount === 0) {
+        setOpeningState("streaming");
+        setIsStreaming(true);
+        setStreamingText("");
+        setLoaded(true);
+        await streamOpeningLine();
+      } else {
+        setLoaded(true);
+      }
     })();
-  }, [authLoading, me, router]);
+  }, [authLoading, me, router, streamOpeningLine]);
 
   // Unmount keepalive: when the user navigates away from /chat without Reid
   // emitting [SESSION_COMPLETE], fire a best-effort POST to /api/sessions/
@@ -769,7 +845,16 @@ export default function ChatPage() {
           messages={messages}
           streamingText={streamingText}
           isStreaming={isStreaming}
-          emptyState={emptyState}
+          // Only surface the empty-state CTA once the opening attempt has
+          // resolved one way or the other — never during 'streaming' (the
+          // thinking indicator owns the screen) and never on 'done' (the
+          // opening line is now in `messages`, so empty-state wouldn't show
+          // anyway, but make the intent explicit).
+          emptyState={
+            openingState === "idle" || openingState === "failed"
+              ? emptyState
+              : undefined
+          }
           headerSlot={headerSlot}
           suppressThinking={voiceMode}
         />
