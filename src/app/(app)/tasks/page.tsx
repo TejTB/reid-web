@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
 import { supabase } from "@/lib/supabase";
 import { GlowCard } from "@/components/ui/glow-card";
@@ -257,34 +257,39 @@ export default function TasksPage() {
                 />
               ))}
             </div>
-          ) : tasks.length === 0 ? (
+          ) : tasks.length === 0 || activeTasks.length === 0 ? (
             <div
               className="flex flex-col items-center text-center"
               style={{ paddingTop: 80, gap: 10 }}
             >
-              <h2
+              <p
                 className="font-serif italic"
                 style={{
-                  fontSize: 32,
+                  fontSize: 22,
                   fontWeight: 400,
-                  color: "#F2EDE3",
-                  letterSpacing: "-0.02em",
-                  lineHeight: 1.2,
-                }}
-              >
-                No tasks yet.
-              </h2>
-              <p
-                className="font-sans"
-                style={{
-                  fontSize: 15,
                   color: "#7A90A8",
-                  lineHeight: 1.55,
+                  letterSpacing: "-0.01em",
+                  lineHeight: 1.35,
                   maxWidth: 360,
                 }}
               >
-                They come from your sessions with Reid.
+                Reid hasn't asked anything of you yet.
               </p>
+              {completedTasks.length > 0 && (
+                <p
+                  className="font-sans"
+                  style={{
+                    fontSize: 13,
+                    color: "#7A90A8",
+                    lineHeight: 1.55,
+                    maxWidth: 360,
+                  }}
+                >
+                  {completedTasks.length === 1
+                    ? "1 task completed."
+                    : `${completedTasks.length} tasks completed.`}
+                </p>
+              )}
             </div>
           ) : (
             <>
@@ -298,13 +303,18 @@ export default function TasksPage() {
                 className="flex flex-col"
                 style={{ gap: 12, listStyle: "none", padding: 0, margin: 0 }}
               >
-                {activeTasks.map((t) => (
-                  <TaskListItem
-                    key={t.id}
-                    task={t}
-                    onOpen={() => setActiveId(t.id)}
-                  />
-                ))}
+                <AnimatePresence initial={false}>
+                  {activeTasks.map((t, i) => (
+                    <TaskListItem
+                      key={t.id}
+                      task={t}
+                      index={i}
+                      isMostRecent={i === 0}
+                      onOpen={() => setActiveId(t.id)}
+                      onComplete={() => markTask(t, true)}
+                    />
+                  ))}
+                </AnimatePresence>
               </motion.ul>
               {completedTasks.length > 0 && (
                 <div style={{ marginTop: 36 }}>
@@ -342,11 +352,14 @@ export default function TasksPage() {
                         marginTop: 16,
                       }}
                     >
-                      {completedTasks.map((t) => (
+                      {completedTasks.map((t, i) => (
                         <TaskListItem
                           key={t.id}
                           task={t}
+                          index={i}
+                          isMostRecent={false}
                           onOpen={() => setActiveId(t.id)}
+                          onComplete={() => markTask(t, true)}
                         />
                       ))}
                     </motion.ul>
@@ -366,110 +379,202 @@ export default function TasksPage() {
   );
 }
 
-type UrgencyTone = "overdue" | "today" | "future";
-
-function urgencyOf(task: UnifiedTask): UrgencyTone {
-  if (task.completed || !task.due_date) return "future";
+function isOverdue(task: UnifiedTask): boolean {
+  if (task.completed || !task.due_date) return false;
   const due = new Date(task.due_date);
-  if (Number.isNaN(due.getTime())) return "future";
+  if (Number.isNaN(due.getTime())) return false;
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-  if (dueDay.getTime() < today.getTime()) return "overdue";
-  if (dueDay.getTime() === today.getTime()) return "today";
-  return "future";
-}
-
-function urgencyBorder(tone: UrgencyTone): string {
-  if (tone === "overdue") return "3px solid #B91C1C";
-  if (tone === "today") return "3px solid #D97706";
-  return "3px solid rgba(255,255,255,0.06)";
+  return dueDay.getTime() < today.getTime();
 }
 
 function TaskListItem({
   task,
+  index,
+  isMostRecent,
   onOpen,
+  onComplete,
 }: {
   task: UnifiedTask;
+  index: number;
+  isMostRecent: boolean;
   onOpen: () => void;
+  onComplete: () => Promise<void> | void;
 }) {
   const due = task.due_date ? `Due ${formatDate(task.due_date)}` : null;
-  const tone = urgencyOf(task);
-  const isOverdue = tone === "overdue";
+  const overdue = isOverdue(task);
+  // Optimistic local "checked" state so the completion animation fires
+  // immediately on click, regardless of network latency.
+  const [checked, setChecked] = useState(task.completed);
+
+  // Sync with prop changes (e.g. the parent flips back via undo).
+  useEffect(() => {
+    setChecked(task.completed);
+  }, [task.completed]);
+
+  const labelText = isMostRecent && !task.completed ? "TODAY'S TASK" : "TASK";
+
+  async function handleCheckbox(e: React.MouseEvent | React.KeyboardEvent) {
+    e.stopPropagation();
+    if (checked) return;
+    setChecked(true);
+    try {
+      await onComplete();
+    } catch {
+      // Roll back the optimistic check if the request failed.
+      setChecked(false);
+    }
+  }
+
   return (
     <motion.li
       layoutId={`task-${task.id}`}
+      layout="position"
       variants={{
-        hidden: { opacity: 0, y: 12 },
+        hidden: { opacity: 0, y: 8 },
         visible: { opacity: 1, y: 0 },
       }}
-      transition={{ duration: 0.35 }}
+      exit={{ opacity: 0, height: 0, marginTop: 0, marginBottom: 0 }}
+      transition={{ duration: 0.35, delay: index * 0.06, ease: "easeOut" }}
       onClick={onOpen}
-      style={{ cursor: "pointer", opacity: task.completed ? 0.4 : 1 }}
+      style={{
+        cursor: "pointer",
+        opacity: checked ? 0.5 : 1,
+        transitionProperty: "opacity",
+      }}
     >
       <GlowCard customSize glowColor="red" className="w-full">
         <div
           style={{
-            padding: "18px 22px",
+            padding: "16px 20px",
             borderRadius: 14,
             display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            borderLeft: urgencyBorder(tone),
+            alignItems: "flex-start",
+            gap: 14,
+            borderLeft: "3px solid rgba(185,28,28,0.4)",
           }}
         >
-          <div className="flex items-start justify-between" style={{ gap: 12 }}>
+          {/* Circle checkbox */}
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={checked}
+            aria-label={checked ? "Task complete" : "Mark task complete"}
+            onClick={handleCheckbox}
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                void handleCheckbox(e);
+              }
+            }}
+            style={{
+              flexShrink: 0,
+              marginTop: 3,
+              width: 20,
+              height: 20,
+              borderRadius: "50%",
+              border: checked
+                ? "1.5px solid #B91C1C"
+                : "1.5px solid rgba(255,255,255,0.2)",
+              background: checked ? "#B91C1C" : "transparent",
+              cursor: checked ? "default" : "pointer",
+              transition:
+                "background-color 300ms ease, border-color 300ms ease",
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {checked && (
+              <motion.svg
+                initial={{ opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                width={10}
+                height={10}
+                viewBox="0 0 10 10"
+                aria-hidden="true"
+              >
+                <path
+                  d="M2 5.2 L4.2 7.4 L8 3"
+                  fill="none"
+                  stroke="#F2EDE3"
+                  strokeWidth={1.6}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </motion.svg>
+            )}
+          </button>
+
+          <div className="flex-1 min-w-0">
+            <div
+              className="flex items-center"
+              style={{ gap: 10, marginBottom: 6 }}
+            >
+              <span
+                className="font-sans"
+                style={{
+                  fontSize: 10,
+                  fontWeight: 500,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  color: "#B91C1C",
+                }}
+              >
+                {labelText}
+              </span>
+              {overdue && (
+                <span
+                  className="font-sans"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: "#F2EDE3",
+                    background: "rgba(185,28,28,0.18)",
+                    border: "1px solid rgba(185,28,28,0.35)",
+                    padding: "2px 7px",
+                    borderRadius: 999,
+                  }}
+                >
+                  Overdue
+                </span>
+              )}
+            </div>
             <p
-              className="font-sans [text-wrap:pretty]"
+              className="font-serif italic [text-wrap:pretty]"
               style={{
-                fontSize: 15,
-                color: "#F2EDE3",
-                lineHeight: 1.55,
+                fontSize: 17,
+                color: checked ? "#7A90A8" : "#F2EDE3",
+                lineHeight: 1.6,
                 margin: 0,
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                textDecoration: task.completed ? "line-through" : "none",
-                textDecorationColor: "rgba(242,237,227,0.45)",
-                flex: 1,
+                textDecoration: checked ? "line-through" : "none",
+                textDecorationColor: "rgba(122,144,168,0.6)",
+                transition: "color 300ms ease",
               }}
             >
               {task.description}
             </p>
-            {isOverdue && (
-              <span
+            {(due || checked) && (
+              <p
                 className="font-sans"
                 style={{
-                  flexShrink: 0,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  color: "#F2EDE3",
-                  background: "rgba(185,28,28,0.18)",
-                  border: "1px solid rgba(185,28,28,0.35)",
-                  padding: "3px 8px",
-                  borderRadius: 999,
+                  fontSize: 12,
+                  color: "#7A90A8",
+                  letterSpacing: "0.02em",
+                  marginTop: 8,
+                  margin: 0,
+                  paddingTop: 8,
                 }}
               >
-                Overdue
-              </span>
+                {checked ? "Done" : due}
+              </p>
             )}
           </div>
-          {(due || task.completed) && (
-            <p
-              className="font-sans"
-              style={{
-                fontSize: 12,
-                color: "#7A90A8",
-                letterSpacing: "0.02em",
-                margin: 0,
-              }}
-            >
-              {task.completed ? "Done" : due}
-            </p>
-          )}
         </div>
       </GlowCard>
     </motion.li>
