@@ -86,8 +86,12 @@ export default function HomePage() {
           },
         });
         if (!cancelled && res.ok) {
-          const json = (await res.json()) as { message?: string };
-          setPushMessage(json.message ?? null);
+          const json = (await res.json()) as { message?: string | null };
+          setPushMessage(
+            typeof json.message === "string" && json.message.trim().length > 0
+              ? json.message
+              : null,
+          );
         }
       } catch (err) {
         console.error("[home] push-message fetch failed:", err);
