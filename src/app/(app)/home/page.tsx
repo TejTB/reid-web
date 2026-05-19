@@ -22,8 +22,10 @@ type LoadedUser = Pick<
   | "onboarding_task"
   | "onboarding_task_completed_at"
   | "session_count"
+  | "sessions_used_this_month"
   | "streak_days"
   | "subscription_status"
+  | "created_at"
 >;
 
 function timeGreeting(now: Date = new Date()): string {
@@ -48,6 +50,18 @@ interface TaskRow {
   text: string;
   completedAt: string | null;
   createdAt: string | null;
+}
+
+// Helper kept outside HomePage so the impure Date.now() call doesn't run
+// in the component render scope (react-hooks/purity). The cost: the banner
+// gate effectively reads "wall-clock now at render time", which is fine —
+// the page re-renders frequently enough that the threshold flips well
+// before the user notices.
+function isOlderThan24h(createdAtIso: string | null | undefined): boolean {
+  if (!createdAtIso) return false;
+  const createdAtMs = new Date(createdAtIso).getTime();
+  if (!Number.isFinite(createdAtMs)) return false;
+  return Date.now() - createdAtMs > 24 * 60 * 60 * 1000;
 }
 
 export default function HomePage() {
@@ -86,8 +100,12 @@ export default function HomePage() {
           },
         });
         if (!cancelled && res.ok) {
-          const json = (await res.json()) as { message?: string };
-          setPushMessage(json.message ?? null);
+          const json = (await res.json()) as { message?: string | null };
+          setPushMessage(
+            typeof json.message === "string" && json.message.trim().length > 0
+              ? json.message
+              : null,
+          );
         }
       } catch (err) {
         console.error("[home] push-message fetch failed:", err);
@@ -216,9 +234,21 @@ export default function HomePage() {
   const sessionCount = user.session_count ?? 0;
   const streak = user.streak_days ?? 0;
 
-  // Banner condition logic. Sprint: show ONLY when triggered.
+  // Banner condition logic. Sprint 11: only fire when ALL true:
+  //   - account is more than 24 hours old
+  //   - user has had at least one session (either monthly or lifetime)
+  //   - their streak has dropped to 0
+  // Day-0 / zero-session accounts must never see this banner.
   let bannerTitle: string | null = null;
-  if (streak === 0 && user.onboarding_complete === true) {
+  const accountOlderThan24h = isOlderThan24h(user.created_at);
+  const hasHadAtLeastOneSession =
+    (user.sessions_used_this_month ?? 0) > 0 || sessionCount > 0;
+  if (
+    accountOlderThan24h &&
+    hasHadAtLeastOneSession &&
+    streak === 0 &&
+    user.onboarding_complete === true
+  ) {
     bannerTitle = "Reid hasn't heard from you yet this week.";
   }
   // Tasks-overdue banner takes precedence if we have a stale incomplete task.

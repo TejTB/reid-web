@@ -1,6 +1,6 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { Mic } from "lucide-react";
@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { PromptInputBox } from "@/components/ui/prompt-input-box";
 import { GlowCard } from "@/components/ui/glow-card";
 import { ShiningText } from "@/components/ui/shining-text";
+import { SessionRecapOverlay } from "@/components/SessionRecapOverlay";
 import type { Message } from "@/types/chat";
 import type { Message as DbMessage, Session as DbSession } from "@/types/db";
 
@@ -160,7 +161,25 @@ function readFileAsDataUrl(file: File): Promise<string> {
 type SessionWithMessages = { session: DbSession; messages: DbMessage[] };
 
 export default function ChatPage() {
+  // useSearchParams requires a Suspense boundary at the page level for the
+  // App Router's static-export pass to succeed. Wrap the real component.
+  return (
+    <Suspense fallback={null}>
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function ChatPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Seed the composer input with `?prefill=` when present (used by the goals
+  // page "Tell Reid about another goal" CTA). Read once on mount; we never
+  // overwrite the user's typing after.
+  const prefillFromUrl = useMemo(() => {
+    const raw = searchParams?.get("prefill") ?? "";
+    return raw.trim().length > 0 ? raw : undefined;
+  }, [searchParams]);
   const { me, loading: authLoading } = useAuth();
   const isPro = useIsPro();
   const userId = me?.id ?? "";
@@ -193,6 +212,10 @@ export default function ChatPage() {
   // post-stream notification cards (observation_created, goal_updated, ...).
   // Cleared at the start of every new send.
   const [pendingActions, setPendingActions] = useState<string[]>([]);
+  // When the server signals SESSION_END (SESSION_COMPLETE sentinel or
+  // 20-message cap), we store the ended session's id so the recap overlay
+  // can fetch its title/note. Cleared when the overlay closes / navigates.
+  const [endedSessionId, setEndedSessionId] = useState<string | null>(null);
   // Voice-mode UI state. The toggle only renders when SpeechRecognition is
   // available; `voiceState` drives the bars / mic indicator.
   const [speechSupported] = useState<boolean>(() => getSpeechRecognitionCtor() !== null);
@@ -219,6 +242,9 @@ export default function ChatPage() {
       const onActions = (types: string[]) => {
         setPendingActions(types);
       };
+      const onSessionEnd = (sid: string) => {
+        setEndedSessionId(sid);
+      };
       try {
         for await (const chunk of streamReid(
           {
@@ -226,7 +252,7 @@ export default function ChatPage() {
             sessionId: currentSessionId,
             messages: msgs,
           },
-          { onSession, onActions },
+          { onSession, onActions, onSessionEnd },
         )) {
           acc += chunk;
           setStreamingText(acc);
@@ -273,7 +299,7 @@ export default function ChatPage() {
               sessionId: currentSessionId,
               messages: msgs,
             },
-            { onSession, onActions },
+            { onSession, onActions, onSessionEnd },
           )) {
             acc += chunk;
             setStreamingText(acc);
@@ -769,6 +795,13 @@ export default function ChatPage() {
   ) : null;
 
   return (
+    <>
+    {endedSessionId && (
+      <SessionRecapOverlay
+        sessionId={endedSessionId}
+        onClose={() => setEndedSessionId(null)}
+      />
+    )}
     <div
       style={{
         height: "100vh",
@@ -799,8 +832,8 @@ export default function ChatPage() {
         </div>
         <div className="flex items-center gap-3">
           {!isPro && me && (() => {
-            const completed = me.session_count ?? 0;
-            const displayed = Math.min(FREE_SESSIONS, completed + 1);
+            const usedThisMonth = me.sessions_used_this_month ?? 0;
+            const displayed = Math.min(FREE_SESSIONS, usedThisMonth + 1);
             const onLastFree = displayed >= FREE_SESSIONS;
             return (
               <span
@@ -921,7 +954,7 @@ export default function ChatPage() {
           </div>
         </div>
       )}
-      {!isPro && me && (me.session_count ?? 0) + 1 >= FREE_SESSIONS && (
+      {!isPro && me && (me.sessions_used_this_month ?? 0) + 1 >= FREE_SESSIONS && (
         <div
           className="fixed left-0 right-0 z-50 bottom-[calc(64px+env(safe-area-inset-bottom)+96px)] md:bottom-[96px] pointer-events-none"
           aria-live="polite"
@@ -1049,6 +1082,7 @@ export default function ChatPage() {
                     onSend={handleSend}
                     isLoading={isStreaming || !loaded}
                     placeholder="What's the situation?"
+                    initialValue={prefillFromUrl}
                     onMicClick={speechSupported ? handleMicClick : undefined}
                     inlineBadge={
                       !isPro && speechSupported ? (
@@ -1063,6 +1097,7 @@ export default function ChatPage() {
         </div>
       )}
     </div>
+    </>
   );
 }
 

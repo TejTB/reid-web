@@ -432,6 +432,20 @@ export async function processSentinels(
         taskSet: parsed.sessionComplete.task,
         bumpUserCounters: true,
       });
+      // Also create a real tasks row so the /tasks page surfaces the
+      // commitment and so outcome-detection has something to count.
+      // (Until sprint 11 the task only lived as text in sessions.task_set.)
+      if (parsed.sessionComplete.task) {
+        try {
+          await db.from("tasks").insert({
+            user_id: userId,
+            session_id: sessionId,
+            description: parsed.sessionComplete.task,
+          });
+        } catch {
+          // ignore — duplicate or constraint failure should not block flow
+        }
+      }
     } catch {
       // ignore
     }

@@ -50,23 +50,41 @@ export function LocationTag({
         </span>
       </div>
 
-      <div className="relative overflow-hidden h-4" style={{ width: "90px" }}>
+      <div
+        className="relative overflow-hidden h-4"
+        title={`${city}, ${country}`}
+        style={{
+          // Sprint 11: drop the hardcoded 90px so "Newcastle, UK" /
+          // "Whitley Bay, Newcastle" / etc render in full. The sidebar
+          // slot itself constrains width; this tag fills it and ellipsises
+          // only when it overflows that slot.
+          maxWidth: "100%",
+          minWidth: 0,
+          flex: "1 1 auto",
+        }}
+      >
         <span
-          className="absolute text-xs font-medium transition-all duration-300 whitespace-nowrap"
+          className="absolute text-xs font-medium transition-all duration-300 whitespace-nowrap overflow-hidden"
           style={{
             color: "#7A90A8",
             transform: isHovered ? "translateY(-100%)" : "translateY(0)",
             opacity: isHovered ? 0 : 1,
+            textOverflow: "ellipsis",
+            maxWidth: "100%",
+            display: "inline-block",
           }}
         >
           {city}, {country}
         </span>
         <span
-          className="absolute text-xs font-medium transition-all duration-300 whitespace-nowrap"
+          className="absolute text-xs font-medium transition-all duration-300 whitespace-nowrap overflow-hidden"
           style={{
             color: "#C8D5E3",
             transform: isHovered ? "translateY(0)" : "translateY(100%)",
             opacity: isHovered ? 1 : 0,
+            textOverflow: "ellipsis",
+            maxWidth: "100%",
+            display: "inline-block",
           }}
         >
           {currentTime} {timezone}

@@ -11,6 +11,7 @@ import {
 
 function SignupInner() {
   const router = useRouter();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -20,6 +21,10 @@ function SignupInner() {
     e.preventDefault();
     if (submitting) return;
     setErrorMsg(null);
+    if (!name.trim()) {
+      setErrorMsg("Reid needs to know what to call you.");
+      return;
+    }
     const emailErr = validateEmail(email);
     if (emailErr) {
       setErrorMsg(emailErr);
@@ -31,7 +36,7 @@ function SignupInner() {
       return;
     }
     setSubmitting(true);
-    const { error: err } = await signUpWithPassword(email, password);
+    const { error: err } = await signUpWithPassword(email, password, name);
     if (err) {
       setSubmitting(false);
       setErrorMsg(err.message);
@@ -40,7 +45,7 @@ function SignupInner() {
     router.replace("/onboarding");
   }
 
-  const disabled = submitting || !email.trim() || !password;
+  const disabled = submitting || !name.trim() || !email.trim() || !password;
 
   return (
     <div className="min-h-screen bg-bg-dark flex flex-col items-center justify-center px-6">
@@ -92,11 +97,35 @@ function SignupInner() {
               style={{ gap: 12 }}
             >
               <input
+                id="name"
+                type="text"
+                required
+                autoComplete="given-name"
+                autoFocus
+                readOnly={submitting}
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (errorMsg) setErrorMsg(null);
+                }}
+                placeholder="Your name"
+                className="font-sans auth-input"
+                style={{
+                  background: "transparent",
+                  borderRadius: 9,
+                  padding: "0 14px",
+                  height: 48,
+                  fontSize: 15,
+                  color: "#F2EDE3",
+                  outline: "none",
+                  width: "100%",
+                }}
+              />
+              <input
                 id="email"
                 type="email"
                 required
                 autoComplete="email"
-                autoFocus
                 readOnly={submitting}
                 value={email}
                 onChange={(e) => {

@@ -66,6 +66,8 @@ type TimelineRow =
       label: string;
       date: string;
       summary: string;
+      title: string | null;
+      reidNote: string | null;
     }
   | {
       kind: "active";
@@ -149,8 +151,10 @@ export default function PlanPage() {
         rows.push({
           kind: "session",
           label,
-          date: formatNodeDate(s.started_at),
+          date: formatNodeDate(s.ended_at ?? s.started_at),
           summary: s.summary?.trim() || "Session ended without a summary.",
+          title: s.title?.trim() ? s.title.trim() : null,
+          reidNote: s.reid_note?.trim() ? s.reid_note.trim() : null,
         });
       }
       actualSessionCount += 1;
@@ -266,17 +270,45 @@ export default function PlanPage() {
                     delay={delay}
                     dot={<SolidDot />}
                   >
+                    {row.title && (
+                      <p
+                        className="font-serif italic [text-wrap:pretty]"
+                        style={{
+                          fontSize: 20,
+                          color: "#F2EDE3",
+                          marginTop: 6,
+                          lineHeight: 1.3,
+                          fontWeight: 500,
+                          letterSpacing: "-0.01em",
+                        }}
+                      >
+                        {row.title}
+                      </p>
+                    )}
                     <p
                       className="font-serif italic whitespace-pre-wrap [text-wrap:pretty]"
                       style={{
-                        fontSize: 18,
-                        color: "#F2EDE3",
-                        marginTop: 6,
-                        lineHeight: 1.45,
+                        fontSize: row.title ? 16 : 18,
+                        color: row.title ? "#C8D5E3" : "#F2EDE3",
+                        marginTop: row.title ? 6 : 6,
+                        lineHeight: 1.5,
                       }}
                     >
                       {row.summary}
                     </p>
+                    {row.reidNote && (
+                      <p
+                        className="font-serif italic [text-wrap:pretty]"
+                        style={{
+                          fontSize: 14,
+                          color: "#7A90A8",
+                          marginTop: 10,
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {row.reidNote}
+                      </p>
+                    )}
                   </TimelineNode>
                 );
               }

@@ -85,14 +85,17 @@ export async function signInWithPassword(
 export async function signUpWithPassword(
   email: string,
   password: string,
+  name?: string,
 ): Promise<{ error: { message: string } | null }> {
   try {
+    const cleanName = name?.trim() || undefined;
     const res = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         email: email.trim().toLowerCase(),
         password,
+        ...(cleanName ? { name: cleanName } : {}),
       }),
     });
     if (res.ok) {
@@ -246,7 +249,7 @@ export async function getMySessions(): Promise<Session[]> {
   const { data, error } = await supabase
     .from("sessions")
     .select(
-      "id, user_id, started_at, ended_at, summary, task_set, message_count",
+      "id, user_id, started_at, ended_at, summary, task_set, message_count, title, reid_note, outcome_captured",
     )
     .order("started_at", { ascending: false });
   if (error || !data) return [];

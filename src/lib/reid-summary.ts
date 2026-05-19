@@ -120,8 +120,13 @@ const NAME_STOPLIST = new Set([
   // discourse markers / greetings
   "the", "my", "hi", "hey", "so", "ok", "okay", "yeah", "yes", "no", "well",
   "actually", "honestly", "basically", "literally", "currently", "right",
+  // hedges & adverbs that follow "I'm" — the "I'm almost ready" trap
+  "almost", "nearly", "kind", "kinda", "sort", "sorta", "just", "still", "going",
+  "ready", "done", "fine", "good", "great", "happy", "tired", "totally",
+  "pretty", "very", "super", "really", "always", "never", "maybe", "probably",
+  "trying", "stuck", "lost", "new", "back", "here", "out", "off", "on",
   // common opener verbs (the "Building a SaaS" trap)
-  "building", "trying", "making", "working", "doing", "thinking", "looking",
+  "building", "making", "working", "doing", "thinking", "looking",
   "planning", "starting", "running", "writing", "creating", "developing",
   "selling", "growing", "scaling", "launching", "shipping", "designing",
   "researching", "validating", "testing", "exploring", "considering",
@@ -177,8 +182,11 @@ export function extractName(input: string | Array<{ role: string; content: strin
       }
     }
 
+    // NOTE: no `i` flag — with `i`, `[A-Z]` matches lowercase letters too,
+    // which turns "i'm almost ready" into a name match for "almost". Connector
+    // alternations are spelled out in both cases instead.
     const phraseMatch = text.match(
-      /(?:^|\s)(?:i'?m|i am|my name(?:'s| is)|it'?s|call me)\s+([A-Z][a-z]{1,20})/i,
+      /(?:^|\s)(?:[Ii]'?[mM]|[Ii] [aA][mM]|[Mm]y [Nn]ame(?:'s| is)|[Ii][tT]'?[sS]|[Cc]all me)\s+([A-Z][a-z]{1,20})(?=[,.!?\s]|$)/,
     );
     if (phraseMatch) {
       const candidate = normaliseFirstName(phraseMatch[1]);

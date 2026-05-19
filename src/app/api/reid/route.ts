@@ -372,7 +372,9 @@ export async function POST(req: NextRequest) {
   // can decide whether to rate-limit.
   const { data: meRow } = await db
     .from("users")
-    .select("id, subscription_status, name")
+    .select(
+      "id, subscription_status, name, sessions_used_this_month, sessions_month_start",
+    )
     .eq("auth_id", authUser.id)
     .maybeSingle();
   if (!meRow?.id) {
@@ -382,6 +384,10 @@ export async function POST(req: NextRequest) {
   const subscriptionStatus =
     (meRow.subscription_status as string | null) ?? "free";
   const existingName = (meRow.name as string | null) ?? null;
+  let sessionsUsedThisMonth =
+    (meRow.sessions_used_this_month as number | null) ?? 0;
+  const sessionsMonthStartIso =
+    (meRow.sessions_month_start as string | null) ?? null;
 
   if (!existingName) {
     const extracted = extractName(messages);
@@ -408,20 +414,42 @@ export async function POST(req: NextRequest) {
 
   // Free-tier session-limit gate (402). Onboarding is exempt — it's the
   // founder's first interaction with Reid and must always be allowed.
+  //
+  // Monthly reset preamble: if the stored month-start is in a prior month,
+  // zero the counter before checking. This keeps the gate idempotent — a
+  // user who returns after the calendar flips gets a clean 5 sessions.
   if (
     creatingNewSession &&
     mode === "chat" &&
     subscriptionStatus !== "pro"
   ) {
-    const { count } = await db
-      .from("sessions")
-      .select("id", { head: true, count: "exact" })
-      .eq("user_id", userId)
-      .eq("mode", "chat");
-    const used = count ?? 0;
-    if (used >= FREE_SESSIONS) {
+    if (sessionsMonthStartIso) {
+      const monthStart = new Date(sessionsMonthStartIso);
+      const now = new Date();
+      const isNewMonth =
+        now.getUTCFullYear() > monthStart.getUTCFullYear() ||
+        (now.getUTCFullYear() === monthStart.getUTCFullYear() &&
+          now.getUTCMonth() > monthStart.getUTCMonth());
+      if (isNewMonth) {
+        const firstOfMonthUtc = new Date(
+          Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+        );
+        await db
+          .from("users")
+          .update({
+            sessions_used_this_month: 0,
+            sessions_month_start: firstOfMonthUtc.toISOString(),
+          })
+          .eq("id", userId);
+        sessionsUsedThisMonth = 0;
+      }
+    }
+    if (sessionsUsedThisMonth >= FREE_SESSIONS) {
       return Response.json(
-        { error: "session_limit_reached", sessionsUsed: used },
+        {
+          error: "session_limit_reached",
+          sessionsUsed: sessionsUsedThisMonth,
+        },
         { status: 402 },
       );
     }
@@ -461,6 +489,18 @@ export async function POST(req: NextRequest) {
       userId,
       mode === "onboarding" ? "onboarding" : "chat",
     );
+    // Bump the monthly session counter at session-create, NOT at
+    // SESSION_COMPLETE. This enforces the 5/month gate even if the founder
+    // never reaches a clean wrap-up. Onboarding stays exempt.
+    if (mode === "chat" && subscriptionStatus !== "pro") {
+      await db
+        .from("users")
+        .update({
+          sessions_used_this_month: sessionsUsedThisMonth + 1,
+        })
+        .eq("id", userId);
+      sessionsUsedThisMonth += 1;
+    }
   }
 
   // Legacy conversations table: keep writing the user turn so existing
@@ -485,7 +525,27 @@ export async function POST(req: NextRequest) {
 
   // ----- Build the system prompt with FOUNDER CONTEXT ------------------
   const reidContext = await getReidContext(db, userId);
-  const systemPrompt = buildSystemPrompt(reidContext);
+  let systemPrompt = buildSystemPrompt(reidContext);
+
+  // Read the session's current message_count BEFORE we stream so we can
+  // inject a wrap-up nudge as we approach the 20-message cap. sessionId is
+  // guaranteed to be defined here (either client-supplied or just minted).
+  const SESSION_HARD_CAP = 20;
+  const SESSION_NUDGE_AT = 16;
+  const { data: preTurnSessionRow } = await db
+    .from("sessions")
+    .select("message_count")
+    .eq("id", sessionId)
+    .maybeSingle();
+  const preTurnMessageCount =
+    (preTurnSessionRow?.message_count as number | null) ?? 0;
+  if (mode === "chat" && preTurnMessageCount >= SESSION_NUDGE_AT) {
+    systemPrompt =
+      systemPrompt +
+      `\n\n[SESSION CHECKPOINT]\nYou are approaching the natural end of this session — about 3 messages from the wrap-up point. ` +
+      `Begin moving the conversation toward a clear, concrete commitment from the founder. ` +
+      `When ready, emit [SESSION_COMPLETE] with summary="..." task="...". Don't drag it out.`;
+  }
 
   // Build the upstream Anthropic messages array. Only the LAST user message
   // packs in optional images (older messages were persisted text-only). Local
@@ -696,6 +756,63 @@ export async function POST(req: NextRequest) {
             }
           }
 
+          // 20-message hard cap. Force-end the session here if the just-
+          // completed turn pushed message_count past SESSION_HARD_CAP and the
+          // session isn't already ended via SESSION_COMPLETE. Only applies to
+          // chat mode — onboarding has its own wrap path.
+          let sessionEnded = !!parsed.sessionComplete;
+          if (mode === "chat" && !sessionEnded) {
+            const { data: postRow } = await db
+              .from("sessions")
+              .select("message_count, ended_at")
+              .eq("id", resolvedSessionId)
+              .maybeSingle();
+            const postMessageCount =
+              (postRow?.message_count as number | null) ?? 0;
+            const alreadyEnded = !!postRow?.ended_at;
+            if (postMessageCount >= SESSION_HARD_CAP && !alreadyEnded) {
+              await db
+                .from("sessions")
+                .update({ ended_at: new Date().toISOString() })
+                .eq("id", resolvedSessionId);
+              sessionEnded = true;
+            }
+          }
+
+          // Outcome detection: a session has a "productive outcome" once it
+          // has at least 1 task, at least 1 goal, and >= 6 messages. We mark
+          // outcome_captured so future heuristics (early sign-off, plan-page
+          // styling) can read it without re-querying.
+          if (mode === "chat") {
+            const { data: outcomeRow } = await db
+              .from("sessions")
+              .select("message_count, outcome_captured")
+              .eq("id", resolvedSessionId)
+              .maybeSingle();
+            const outcomeAlready = !!outcomeRow?.outcome_captured;
+            const msgCount =
+              (outcomeRow?.message_count as number | null) ?? 0;
+            if (!outcomeAlready && msgCount >= 6) {
+              const [{ count: taskCount }, { count: goalCount }] =
+                await Promise.all([
+                  db
+                    .from("tasks")
+                    .select("id", { head: true, count: "exact" })
+                    .eq("session_id", resolvedSessionId),
+                  db
+                    .from("goals")
+                    .select("id", { head: true, count: "exact" })
+                    .eq("user_id", userId),
+                ]);
+              if ((taskCount ?? 0) >= 1 && (goalCount ?? 0) >= 1) {
+                await db
+                  .from("sessions")
+                  .update({ outcome_captured: true })
+                  .eq("id", resolvedSessionId);
+              }
+            }
+          }
+
           // Emit the trailing REID_ACTIONS marker so the client can render
           // action notifications (observation/goal/task). The unique
           // \x1e (record-separator) prefix keeps it distinct from any text
@@ -710,6 +827,16 @@ export async function POST(req: NextRequest) {
           if (actionTypes.length > 0 && !closed) {
             const marker = `\x1eREID_ACTIONS:${JSON.stringify(actionTypes)}\n`;
             controller.enqueue(encoder.encode(marker));
+          }
+
+          // If this turn ended the session (SESSION_COMPLETE sentinel OR
+          // the 20-message hard cap), tell the client so it can render the
+          // recap overlay.
+          if (sessionEnded && mode === "chat" && !closed) {
+            const endMarker = `\x1eREID_SESSION_END:${JSON.stringify({
+              session_id: resolvedSessionId,
+            })}\n`;
+            controller.enqueue(encoder.encode(endMarker));
           }
         } catch {
           // Already delivered to the client; persistence is best-effort.
