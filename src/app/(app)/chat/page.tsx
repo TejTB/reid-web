@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
@@ -161,6 +161,16 @@ function readFileAsDataUrl(file: File): Promise<string> {
 type SessionWithMessages = { session: DbSession; messages: DbMessage[] };
 
 export default function ChatPage() {
+  // useSearchParams requires a Suspense boundary at the page level for the
+  // App Router's static-export pass to succeed. Wrap the real component.
+  return (
+    <Suspense fallback={null}>
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function ChatPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   // Seed the composer input with `?prefill=` when present (used by the goals
