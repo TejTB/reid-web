@@ -1,0 +1,5 @@
+[     394ms] [INFO] Loading the script 'https://vercel.live/_next-live/feedback/feedback.js' violates the following Content Security Policy directive: "script-src 'self' 'unsafe-inline'". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The policy is report-only, so the violation has been logged but no further action has been taken. @ https://reid-72ah2jhr7-tejtbs-projects.vercel.app/_next/static/chunks/turbopack-00nqzlpwqfw64.js:1
+[     463ms] [ERROR] Framing 'https://vercel.live/' violates the following report-only Content Security Policy directive: "default-src 'self'". The violation has been logged, but no further action has been taken. Note that 'frame-src' was not explicitly set, so 'default-src' is used as a fallback.
+ @ https://vercel.live/:0
+[     522ms] [ERROR] Framing 'https://vercel.live/' violates the following report-only Content Security Policy directive: "default-src 'self'". The violation has been logged, but no further action has been taken. Note that 'frame-src' was not explicitly set, so 'default-src' is used as a fallback.
+ @ https://vercel.live/:0

@@ -1,0 +1,36 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - main [ref=e3]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - heading "What Reid's noticed" [level=1] [ref=e8]
+          - paragraph [ref=e9]: Patterns Reid keeps an eye on between sessions.
+        - button "Refresh observations" [ref=e10] [cursor=pointer]:
+          - img [ref=e11]
+    - navigation [ref=e21]:
+      - generic [ref=e22]:
+        - link "Home" [ref=e23] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e24]
+          - generic [ref=e27]: Home
+        - link "Goals" [ref=e28] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e29]
+          - generic [ref=e33]: Goals
+        - link "Reid" [ref=e34] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e35]
+          - generic [ref=e37]: Reid
+        - link "Noticed" [ref=e38] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e40]
+          - generic [ref=e43]: Noticed
+        - link "Plan" [ref=e44] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e45]
+          - generic [ref=e47]: Plan
+        - link "Tasks" [ref=e48] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e49]
+          - generic [ref=e52]: Tasks
+  - alert [ref=e53]

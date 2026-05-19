@@ -1,0 +1,15 @@
+- generic [ref=e1]:
+  - alert [ref=e22]
+  - generic [ref=e36]:
+    - banner [ref=e37]:
+      - img [ref=e39]
+      - generic [ref=e43]: Reid
+    - generic "Onboarding progress" [ref=e45]
+    - generic [ref=e47]:
+      - paragraph [ref=e49]: I've been waiting. What are you building?
+      - paragraph [ref=e60]: I'm Theo. I'm building Reid — an AI co-founder for founders who don't have one. Trying to launch by end of month.
+      - paragraph [ref=e62]: End of month is 12 days. What's not done?
+    - generic [ref=e52]:
+      - textbox "What's the situation?" [active] [ref=e53]
+      - button "Send" [disabled] [ref=e54]:
+        - img [ref=e55]

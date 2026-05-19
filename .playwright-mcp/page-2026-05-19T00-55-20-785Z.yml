@@ -1,0 +1,45 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - main [ref=e3]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - generic [ref=e7]:
+            - heading "Reid" [level=1] [ref=e8]
+            - generic [ref=e9]: "Last session: Today 1:48am"
+          - generic [ref=e11]: Session 1 of 3
+        - paragraph [ref=e15]: thinking.
+        - generic [ref=e20]:
+          - textbox "What's the situation?" [disabled] [ref=e21]
+          - generic [ref=e22]:
+            - button "Attach image" [disabled] [ref=e24]:
+              - img [ref=e25]
+            - generic [ref=e27]:
+              - button "Sending" [disabled]:
+                - img
+    - navigation [ref=e28]:
+      - generic [ref=e29]:
+        - link "Home" [ref=e30] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e31]
+          - generic [ref=e34]: Home
+        - link "Goals" [ref=e35] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e36]
+          - generic [ref=e40]: Goals
+        - link "Reid" [ref=e41] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e43]
+          - generic [ref=e45]: Reid
+        - link "Noticed" [ref=e46] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e47]
+          - generic [ref=e50]: Noticed
+        - link "Plan" [ref=e51] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e52]
+          - generic [ref=e54]: Plan
+        - link "Tasks" [ref=e55] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e56]
+          - generic [ref=e59]: Tasks
+  - alert [ref=e60]

@@ -1,0 +1,57 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e6]
+        - generic [ref=e10]: Reid
+        - button "Open settings" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+      - navigation [ref=e15]:
+        - link "Home" [ref=e16] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e17]
+          - generic [ref=e20]: Home
+        - link "Goals" [ref=e21] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e22]
+          - generic [ref=e26]: Goals
+        - link "Reid" [ref=e27] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e28]
+          - generic [ref=e30]: Reid
+        - link "Noticed" [ref=e31] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e32]
+          - generic [ref=e35]: Noticed
+        - link "Plan" [ref=e36] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e37]
+          - generic [ref=e39]: Plan
+        - link "Tasks" [ref=e40] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e41]
+          - generic [ref=e44]: Tasks
+      - button "Open account menu" [ref=e46]:
+        - generic [ref=e48]: T
+        - generic [ref=e49]: Theo
+    - main [ref=e50]:
+      - generic [ref=e52]:
+        - generic [ref=e53]:
+          - heading "Settings" [level=1] [ref=e54]
+          - paragraph [ref=e55]: Account, plan, session.
+        - generic [ref=e56]:
+          - generic [ref=e58]:
+            - paragraph [ref=e59]: ACCOUNT
+            - paragraph [ref=e60]: Theo
+            - paragraph [ref=e61]: theodoretb10+sprint8f-26051902@gmail.com
+            - paragraph [ref=e62]: Member since May 19, 2026
+            - button "Change password →" [ref=e64] [cursor=pointer]
+          - generic [ref=e66]:
+            - paragraph [ref=e67]: PLAN
+            - generic [ref=e68]:
+              - generic [ref=e69]:
+                - paragraph [ref=e70]: Free
+                - paragraph [ref=e71]: 1 of 3 sessions used.
+              - button "Upgrade to Pro →" [ref=e72] [cursor=pointer]
+          - button "Sign out" [ref=e74] [cursor=pointer]
+  - alert [ref=e75]

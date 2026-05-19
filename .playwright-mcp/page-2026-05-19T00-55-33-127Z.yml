@@ -1,0 +1,49 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - main [ref=e3]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - heading "Settings" [level=1] [ref=e7]
+          - paragraph [ref=e8]: Account, plan, session.
+        - generic [ref=e9]:
+          - generic [ref=e11]:
+            - paragraph [ref=e12]: ACCOUNT
+            - paragraph [ref=e13]: Theo
+            - paragraph [ref=e14]: theodoretb10+sprint8f-26051902@gmail.com
+            - paragraph [ref=e15]: Member since May 19, 2026
+            - button "Change password →" [ref=e17] [cursor=pointer]
+          - generic [ref=e19]:
+            - paragraph [ref=e20]: PLAN
+            - generic [ref=e21]:
+              - generic [ref=e22]:
+                - paragraph [ref=e23]: Free
+                - paragraph [ref=e24]: 0 of 3 sessions used.
+              - button "Upgrade to Pro →" [ref=e25] [cursor=pointer]
+          - button "Sign out" [ref=e27] [cursor=pointer]
+    - navigation [ref=e28]:
+      - generic [ref=e29]:
+        - link "Home" [ref=e30] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e31]
+          - generic [ref=e34]: Home
+        - link "Goals" [ref=e35] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e36]
+          - generic [ref=e40]: Goals
+        - link "Reid" [ref=e41] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e42]
+          - generic [ref=e44]: Reid
+        - link "Noticed" [ref=e45] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e46]
+          - generic [ref=e49]: Noticed
+        - link "Plan" [ref=e50] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e51]
+          - generic [ref=e53]: Plan
+        - link "Tasks" [ref=e54] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e55]
+          - generic [ref=e58]: Tasks
+  - alert [ref=e59]

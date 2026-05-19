@@ -1,0 +1,57 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - main [ref=e3]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - heading "Good morning, Theo." [level=1] [ref=e7]
+          - paragraph [ref=e8]: Here's where things stand.
+        - generic [ref=e9]:
+          - generic [ref=e12]:
+            - generic [ref=e13]: YOUR FOCUS
+            - generic [ref=e14]:
+              - paragraph [ref=e15]: Theo is launching Reid in 12 days, has pricing set but hasn't sent a single paying ask, and is using beta labels and free access to avoid finding out whether anyone will actually pay.
+              - paragraph [ref=e18]: New ground
+          - generic [ref=e21]:
+            - generic [ref=e22]: TODAY'S TASK
+            - generic [ref=e24]:
+              - paragraph [ref=e25]: All done.
+              - paragraph [ref=e26]: Reid will assign more next session.
+          - generic [ref=e28]:
+            - generic [ref=e29]: What Reid Noticed
+            - link "See all →" [ref=e30] [cursor=pointer]:
+              - /url: /observations
+          - generic [ref=e34]:
+            - generic [ref=e35]: CONTINUE
+            - generic [ref=e36]:
+              - paragraph [ref=e37]: Pick up where you left off.
+              - link "Open session" [ref=e38] [cursor=pointer]:
+                - /url: /chat
+                - generic [ref=e39]: Open session
+                - img [ref=e40]
+    - navigation [ref=e42]:
+      - generic [ref=e43]:
+        - link "Home" [ref=e44] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e46]
+          - generic [ref=e49]: Home
+        - link "Goals" [ref=e50] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e51]
+          - generic [ref=e55]: Goals
+        - link "Reid" [ref=e56] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e57]
+          - generic [ref=e59]: Reid
+        - link "Noticed" [ref=e60] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e61]
+          - generic [ref=e64]: Noticed
+        - link "Plan" [ref=e65] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e66]
+          - generic [ref=e68]: Plan
+        - link "Tasks" [ref=e69] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e70]
+          - generic [ref=e73]: Tasks
+  - alert [ref=e74]
