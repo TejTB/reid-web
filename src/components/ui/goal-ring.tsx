@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 interface GoalRingProps {
   currentValue: number;
@@ -10,25 +10,26 @@ interface GoalRingProps {
   label: string;
   deadline?: string | null;
   size?: "sm" | "md" | "lg";
-}
-
-function getProgressColor(current: number, target: number): string {
-  if (target === 0) return "#B91C1C";
-  const pct = current / target;
-  if (pct >= 0.7) return "#16A34A";
-  if (pct >= 0.3) return "#D97706";
-  return "#B91C1C";
+  /** When true, omit the label/value text block below the ring. Use this
+   *  from layouts that render their own title + metrics next to the ring
+   *  (e.g. the goals primary-card layout in Sprint 11). Defaults to false
+   *  so existing call sites (home mini-ring) keep their text block. */
+  hideMeta?: boolean;
 }
 
 function formatValue(value: number, unit: string, unitPrefix: boolean): string {
-  const formatted = value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+  const formatted =
+    value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
   return unitPrefix ? `${unit}${formatted}` : `${formatted} ${unit}`;
 }
 
-function circumference(r: number): number {
-  return 2 * Math.PI * r;
-}
-
+// Sprint 11 GoalRing redesign:
+//   - Full 360° circle (not the legacy half-arc)
+//   - Centre text is the PERCENTAGE ONLY. Nothing else inside the SVG.
+//   - Background arc: rgba(185,28,28,0.2). Progress arc: #B91C1C.
+//   - Goal title, current/target values, due date — rendered below the SVG
+//     (or hidden via hideMeta and rendered by the parent card layout).
+//   - Sizes: sm=60, md=120 (home mini-ring), lg=180 (goals page primary).
 export function GoalRing({
   currentValue,
   targetValue,
@@ -37,125 +38,136 @@ export function GoalRing({
   label,
   deadline,
   size = "lg",
+  hideMeta = false,
 }: GoalRingProps) {
-  const strokeRef = useRef<SVGCircleElement>(null);
-  const reactId = useId();
-  const gradId = `goal-grad-${reactId.replace(/:/g, "")}`;
+  const progressRef = useRef<SVGCircleElement>(null);
 
-  const sizeMap = { sm: 60, md: 120, lg: 200 };
-  const svgSize = sizeMap[size];
-  const radius = svgSize * 0.4;
-  const dist = circumference(radius);
-  const distHalf = dist / 2;
-  const progress = targetValue > 0 ? Math.min(currentValue / targetValue, 1) : 0;
-  const strokeDashoffset = progress * -distHalf;
-  const color = getProgressColor(currentValue, targetValue);
-  const strokeWidth = size === "lg" ? 8 : size === "md" ? 6 : 4;
+  const sizeMap = { sm: 60, md: 120, lg: 180 };
+  const diameter = sizeMap[size];
+  const strokeWidth = 8;
+  const radius = (diameter - strokeWidth) / 2;
+  const cx = diameter / 2;
+  const cy = diameter / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  const safeTarget = targetValue > 0 ? targetValue : 1;
+  const progress = Math.max(0, Math.min(currentValue / safeTarget, 1));
+  const targetOffset = circumference * (1 - progress);
+  const pctLabel = Math.round(progress * 100);
+  const fontSize = Math.round(diameter * 0.18);
 
   useEffect(() => {
-    if (!strokeRef.current) return;
-    strokeRef.current.animate(
+    if (!progressRef.current) return;
+    progressRef.current.animate(
       [
-        { strokeDashoffset: "0", offset: 0 },
-        { strokeDashoffset: "0", offset: 400 / 1400 },
-        { strokeDashoffset: strokeDashoffset.toString() },
+        { strokeDashoffset: String(circumference) },
+        { strokeDashoffset: String(targetOffset) },
       ],
-      { duration: 1400, easing: "cubic-bezier(0.65, 0, 0.35, 1)", fill: "forwards" },
+      {
+        duration: 1100,
+        easing: "cubic-bezier(0.65, 0, 0.35, 1)",
+        fill: "forwards",
+      },
     );
-  }, [currentValue, targetValue, strokeDashoffset]);
+  }, [circumference, targetOffset]);
+
+  const aria = `${label}: ${formatValue(currentValue, unit, unitPrefix)} of ${formatValue(
+    targetValue,
+    unit,
+    unitPrefix,
+  )} (${pctLabel}%)`;
 
   return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="relative" style={{ width: svgSize, height: svgSize / 2 + strokeWidth }}>
-        <svg
-          viewBox={`0 0 ${svgSize} ${svgSize / 2 + strokeWidth}`}
-          style={{ width: svgSize, height: svgSize / 2 + strokeWidth }}
-          aria-label={`${label}: ${formatValue(currentValue, unit, unitPrefix)} of ${formatValue(targetValue, unit, unitPrefix)}`}
-        >
-          <defs>
-            <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor={color} stopOpacity="0.6" />
-              <stop offset="100%" stopColor={color} stopOpacity="1" />
-            </linearGradient>
-          </defs>
-          <g
-            fill="none"
-            strokeWidth={strokeWidth}
-            transform={`translate(${svgSize / 2}, ${svgSize / 2})`}
-          >
-            <circle
-              r={radius}
-              stroke="rgba(255,255,255,0.06)"
-              strokeDasharray={`${distHalf} ${distHalf}`}
-              strokeLinecap="round"
-              transform="rotate(-180)"
-            />
-            <circle
-              ref={strokeRef}
-              r={radius}
-              stroke={`url(#${gradId})`}
-              strokeDasharray={`${distHalf} ${distHalf}`}
-              strokeDashoffset={0}
-              strokeLinecap="round"
-              transform="rotate(-180)"
-            />
-          </g>
-        </svg>
-
-        <div
-          className="absolute bottom-0 left-0 right-0 text-center"
-          style={{ paddingBottom: size === "lg" ? 8 : 4 }}
-        >
-          <div
-            style={{
-              fontFamily: "'Inter', sans-serif",
-              fontWeight: 700,
-              fontSize: size === "lg" ? 32 : size === "md" ? 22 : 14,
-              color: "#F2EDE3",
-              lineHeight: 1,
-            }}
-          >
-            {formatValue(currentValue, unit, unitPrefix)}
-          </div>
-          <div
-            style={{
-              fontFamily: "'Inter', sans-serif",
-              fontWeight: 400,
-              fontSize: size === "lg" ? 12 : 10,
-              color: "#7A90A8",
-              marginTop: 2,
-            }}
-          >
-            of {formatValue(targetValue, unit, unitPrefix)}
-          </div>
-        </div>
-      </div>
-
-      <div className="text-center">
-        <p
+    <div className="flex flex-col items-center" style={{ gap: 12 }}>
+      <svg
+        viewBox={`0 0 ${diameter} ${diameter}`}
+        style={{ width: diameter, height: diameter, display: "block" }}
+        role="img"
+        aria-label={aria}
+      >
+        {/* Background arc */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={radius}
+          fill="none"
+          stroke="rgba(185,28,28,0.2)"
+          strokeWidth={strokeWidth}
+        />
+        {/* Progress arc — start at 12 o'clock via -90° rotation */}
+        <circle
+          ref={progressRef}
+          cx={cx}
+          cy={cy}
+          r={radius}
+          fill="none"
+          stroke="#B91C1C"
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference}
+          transform={`rotate(-90 ${cx} ${cy})`}
+        />
+        {/* Percentage — the ONLY text inside the SVG */}
+        <text
+          x={cx}
+          y={cy}
+          textAnchor="middle"
+          dominantBaseline="middle"
           style={{
-            fontFamily: "'Playfair Display', serif",
-            fontStyle: "italic",
-            fontSize: size === "lg" ? 18 : size === "md" ? 14 : 12,
-            color: "#F2EDE3",
-            lineHeight: 1.3,
+            fontFamily: "'Inter', sans-serif",
+            fontWeight: 600,
+            fontSize,
+            fill: "#F2EDE3",
           }}
         >
-          {label}
-        </p>
-        {deadline && (
+          {pctLabel}%
+        </text>
+      </svg>
+
+      {!hideMeta && (
+        <div className="text-center">
+          <p
+            style={{
+              fontFamily: "'Playfair Display', serif",
+              fontStyle: "italic",
+              fontSize: size === "lg" ? 18 : size === "md" ? 14 : 12,
+              color: "#F2EDE3",
+              lineHeight: 1.3,
+            }}
+          >
+            {label}
+          </p>
           <p
             style={{
               fontFamily: "'Inter', sans-serif",
-              fontSize: 11,
-              color: "#7A90A8",
+              fontSize: 12,
+              color: "#C8D5E3",
               marginTop: 4,
+              lineHeight: 1.4,
             }}
           >
-            Due {new Date(deadline).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+            {formatValue(currentValue, unit, unitPrefix)} of{" "}
+            {formatValue(targetValue, unit, unitPrefix)}
           </p>
-        )}
-      </div>
+          {deadline && (
+            <p
+              style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 11,
+                color: "#7A90A8",
+                marginTop: 4,
+              }}
+            >
+              Due{" "}
+              {new Date(deadline).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short",
+              })}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
