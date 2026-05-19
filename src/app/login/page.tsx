@@ -65,16 +65,16 @@ function LoginInner() {
 
         {/* Title — fades in after 500ms */}
         <h1
-          className="font-serif text-text-primary text-center login-title"
+          className="font-serif italic text-text-primary text-center login-title"
           style={{
-            fontSize: 34,
+            fontSize: 30,
             fontWeight: 500,
             letterSpacing: "-0.02em",
-            lineHeight: 1.15,
+            lineHeight: 1.2,
             marginTop: 20,
           }}
         >
-          Reid
+          Welcome back.
         </h1>
 
         {/* Body + form + footer — fade up together after 800ms */}
@@ -88,16 +88,15 @@ function LoginInner() {
           >
             {/* Body copy */}
             <p
-              className="font-serif italic text-text-primary text-center"
+              className="font-sans text-center"
               style={{
-                fontSize: 18,
-                lineHeight: 1.5,
+                fontSize: 14,
+                color: "#7A90A8",
+                lineHeight: 1.6,
                 maxWidth: 340,
               }}
             >
-              Welcome back.
-              <br />
-              Sign in to continue.
+              Reid&apos;s been keeping notes.
             </p>
 
             {/* Form */}
@@ -175,9 +174,9 @@ function LoginInner() {
                 disabled={disabled}
                 className="cta-shadow flex items-center justify-center font-sans text-text-primary"
                 style={{
-                  height: 46,
-                  borderRadius: 9,
-                  fontSize: 13,
+                  height: 48,
+                  borderRadius: 10,
+                  fontSize: 14,
                   fontWeight: 500,
                   letterSpacing: "0.04em",
                   background: "#B91C1C",
@@ -211,7 +210,7 @@ function LoginInner() {
                   href="/signup"
                   style={{ color: "#C8D5E3", textDecoration: "underline" }}
                 >
-                  Create one
+                  Start here →
                 </Link>
               </p>
               <Link
@@ -300,12 +299,13 @@ function LoginInner() {
           animation: login-pulse 1500ms ease-in-out infinite;
         }
         .login-input {
-          border: 1px solid transparent;
-          transition: border-color 200ms ease;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          transition: border-color 200ms ease, box-shadow 200ms ease;
         }
         .login-input:focus,
         .login-input:focus-visible {
-          border: 1px solid #b91c1c;
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.15);
           outline: none;
         }
       `}</style>
