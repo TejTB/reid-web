@@ -26,6 +26,11 @@ export interface User {
   push_message: string | null;
   push_message_date: string | null;
   last_session_date: string | null;
+  /** Sessions consumed in the current calendar month. Reset to 0 at the start
+   *  of each month by the gate in /api/reid. Drives the 5-of-5 paywall. */
+  sessions_used_this_month: number;
+  /** UTC timestamp of the first day of the month the counter belongs to. */
+  sessions_month_start: string;
 }
 
 export interface Conversation {

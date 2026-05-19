@@ -4,4 +4,4 @@
 // the free-tier session quota without dragging the browser-only supabase
 // client onto the server.
 
-export const FREE_SESSIONS = 3 as const;
+export const FREE_SESSIONS = 5 as const;

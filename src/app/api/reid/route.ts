@@ -372,7 +372,9 @@ export async function POST(req: NextRequest) {
   // can decide whether to rate-limit.
   const { data: meRow } = await db
     .from("users")
-    .select("id, subscription_status, name")
+    .select(
+      "id, subscription_status, name, sessions_used_this_month, sessions_month_start",
+    )
     .eq("auth_id", authUser.id)
     .maybeSingle();
   if (!meRow?.id) {
@@ -382,6 +384,10 @@ export async function POST(req: NextRequest) {
   const subscriptionStatus =
     (meRow.subscription_status as string | null) ?? "free";
   const existingName = (meRow.name as string | null) ?? null;
+  let sessionsUsedThisMonth =
+    (meRow.sessions_used_this_month as number | null) ?? 0;
+  const sessionsMonthStartIso =
+    (meRow.sessions_month_start as string | null) ?? null;
 
   if (!existingName) {
     const extracted = extractName(messages);
@@ -408,20 +414,42 @@ export async function POST(req: NextRequest) {
 
   // Free-tier session-limit gate (402). Onboarding is exempt — it's the
   // founder's first interaction with Reid and must always be allowed.
+  //
+  // Monthly reset preamble: if the stored month-start is in a prior month,
+  // zero the counter before checking. This keeps the gate idempotent — a
+  // user who returns after the calendar flips gets a clean 5 sessions.
   if (
     creatingNewSession &&
     mode === "chat" &&
     subscriptionStatus !== "pro"
   ) {
-    const { count } = await db
-      .from("sessions")
-      .select("id", { head: true, count: "exact" })
-      .eq("user_id", userId)
-      .eq("mode", "chat");
-    const used = count ?? 0;
-    if (used >= FREE_SESSIONS) {
+    if (sessionsMonthStartIso) {
+      const monthStart = new Date(sessionsMonthStartIso);
+      const now = new Date();
+      const isNewMonth =
+        now.getUTCFullYear() > monthStart.getUTCFullYear() ||
+        (now.getUTCFullYear() === monthStart.getUTCFullYear() &&
+          now.getUTCMonth() > monthStart.getUTCMonth());
+      if (isNewMonth) {
+        const firstOfMonthUtc = new Date(
+          Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+        );
+        await db
+          .from("users")
+          .update({
+            sessions_used_this_month: 0,
+            sessions_month_start: firstOfMonthUtc.toISOString(),
+          })
+          .eq("id", userId);
+        sessionsUsedThisMonth = 0;
+      }
+    }
+    if (sessionsUsedThisMonth >= FREE_SESSIONS) {
       return Response.json(
-        { error: "session_limit_reached", sessionsUsed: used },
+        {
+          error: "session_limit_reached",
+          sessionsUsed: sessionsUsedThisMonth,
+        },
         { status: 402 },
       );
     }
@@ -461,6 +489,18 @@ export async function POST(req: NextRequest) {
       userId,
       mode === "onboarding" ? "onboarding" : "chat",
     );
+    // Bump the monthly session counter at session-create, NOT at
+    // SESSION_COMPLETE. This enforces the 5/month gate even if the founder
+    // never reaches a clean wrap-up. Onboarding stays exempt.
+    if (mode === "chat" && subscriptionStatus !== "pro") {
+      await db
+        .from("users")
+        .update({
+          sessions_used_this_month: sessionsUsedThisMonth + 1,
+        })
+        .eq("id", userId);
+      sessionsUsedThisMonth += 1;
+    }
   }
 
   // Legacy conversations table: keep writing the user turn so existing

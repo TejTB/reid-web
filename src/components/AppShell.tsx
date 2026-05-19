@@ -93,9 +93,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const streak = me?.streak_days ?? 0;
   const sessionCount = me?.session_count ?? 0;
+  const usedThisMonth = me?.sessions_used_this_month ?? 0;
   const sessionLabel = isPro
     ? `Session ${sessionCount}`
-    : `Session ${Math.min(sessionCount + 1, FREE_SESSIONS)} of ${FREE_SESSIONS}`;
+    : `Session ${Math.min(usedThisMonth + 1, FREE_SESSIONS)} of ${FREE_SESSIONS}`;
   const streakLabel = streak > 0 ? `🔥 ${streak} day streak` : "Start your streak";
 
   return (

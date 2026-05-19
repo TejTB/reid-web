@@ -22,10 +22,11 @@ export default function SettingsModal() {
   const status = me?.subscription_status ?? "free";
   const isPro = status === "pro";
   const isPastDue = status === "past_due";
-  // Clamp the free-tier session count to FREE_SESSIONS so the visible number
-  // can never exceed the quota even if the server-side count drifts. Matches
-  // the same logic used in /settings.
-  const rawSessionCount = me?.session_count ?? 0;
+  // Clamp the monthly free-tier counter to FREE_SESSIONS so the visible
+  // number can never exceed the quota even if the server-side count drifts.
+  // Reads sessions_used_this_month (the gating counter), not the lifetime
+  // session_count.
+  const rawSessionCount = me?.sessions_used_this_month ?? 0;
   const usedSessions =
     rawSessionCount <= 0
       ? 0
@@ -196,7 +197,7 @@ export default function SettingsModal() {
                   ? "Reid Pro — unlimited"
                   : isPastDue
                   ? "Payment failed"
-                  : `Free · ${usedSessions} of ${FREE_SESSIONS} sessions used`}
+                  : `Free · ${usedSessions} of ${FREE_SESSIONS} this month`}
               </span>
               <button
                 type="button"

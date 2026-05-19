@@ -799,8 +799,8 @@ export default function ChatPage() {
         </div>
         <div className="flex items-center gap-3">
           {!isPro && me && (() => {
-            const completed = me.session_count ?? 0;
-            const displayed = Math.min(FREE_SESSIONS, completed + 1);
+            const usedThisMonth = me.sessions_used_this_month ?? 0;
+            const displayed = Math.min(FREE_SESSIONS, usedThisMonth + 1);
             const onLastFree = displayed >= FREE_SESSIONS;
             return (
               <span
@@ -921,7 +921,7 @@ export default function ChatPage() {
           </div>
         </div>
       )}
-      {!isPro && me && (me.session_count ?? 0) + 1 >= FREE_SESSIONS && (
+      {!isPro && me && (me.sessions_used_this_month ?? 0) + 1 >= FREE_SESSIONS && (
         <div
           className="fixed left-0 right-0 z-50 bottom-[calc(64px+env(safe-area-inset-bottom)+96px)] md:bottom-[96px] pointer-events-none"
           aria-live="polite"

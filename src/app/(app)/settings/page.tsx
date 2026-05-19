@@ -186,7 +186,7 @@ export default function SettingsPage() {
   }
 
   const isPro = me.subscription_status === "pro";
-  const usedSessions = clampFreeUsage(me.session_count ?? 0);
+  const usedSessions = clampFreeUsage(me.sessions_used_this_month ?? 0);
   const joinDate = formatJoinDate(me.created_at);
   const renewDate = formatRenewDate(me.subscription_period_end);
   const rawName = me.name?.trim() || null;
@@ -401,7 +401,7 @@ export default function SettingsPage() {
               >
                 {isPro
                   ? "Unlimited sessions."
-                  : `${usedSessions} of ${FREE_SESSIONS} sessions used.`}
+                  : `${usedSessions} of ${FREE_SESSIONS} sessions used this month.`}
               </p>
               {isPro && renewDate && (
                 <p
