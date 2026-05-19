@@ -249,7 +249,7 @@ export async function getMySessions(): Promise<Session[]> {
   const { data, error } = await supabase
     .from("sessions")
     .select(
-      "id, user_id, started_at, ended_at, summary, task_set, message_count",
+      "id, user_id, started_at, ended_at, summary, task_set, message_count, title, reid_note, outcome_captured",
     )
     .order("started_at", { ascending: false });
   if (error || !data) return [];

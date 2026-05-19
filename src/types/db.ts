@@ -49,6 +49,13 @@ export interface Session {
   summary: string | null;
   task_set: string | null;
   message_count: number;
+  /** Set by /api/session-recap once the session has ended. 3-6 word title. */
+  title: string | null;
+  /** One-sentence Reid voice line written into the recap. */
+  reid_note: string | null;
+  /** True once we've detected a "productive outcome" — used to allow soft
+   *  early-end without waiting to message 20. */
+  outcome_captured: boolean;
 }
 
 export interface Message {

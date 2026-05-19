@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { PromptInputBox } from "@/components/ui/prompt-input-box";
 import { GlowCard } from "@/components/ui/glow-card";
 import { ShiningText } from "@/components/ui/shining-text";
+import { SessionRecapOverlay } from "@/components/SessionRecapOverlay";
 import type { Message } from "@/types/chat";
 import type { Message as DbMessage, Session as DbSession } from "@/types/db";
 
@@ -193,6 +194,10 @@ export default function ChatPage() {
   // post-stream notification cards (observation_created, goal_updated, ...).
   // Cleared at the start of every new send.
   const [pendingActions, setPendingActions] = useState<string[]>([]);
+  // When the server signals SESSION_END (SESSION_COMPLETE sentinel or
+  // 20-message cap), we store the ended session's id so the recap overlay
+  // can fetch its title/note. Cleared when the overlay closes / navigates.
+  const [endedSessionId, setEndedSessionId] = useState<string | null>(null);
   // Voice-mode UI state. The toggle only renders when SpeechRecognition is
   // available; `voiceState` drives the bars / mic indicator.
   const [speechSupported] = useState<boolean>(() => getSpeechRecognitionCtor() !== null);
@@ -219,6 +224,9 @@ export default function ChatPage() {
       const onActions = (types: string[]) => {
         setPendingActions(types);
       };
+      const onSessionEnd = (sid: string) => {
+        setEndedSessionId(sid);
+      };
       try {
         for await (const chunk of streamReid(
           {
@@ -226,7 +234,7 @@ export default function ChatPage() {
             sessionId: currentSessionId,
             messages: msgs,
           },
-          { onSession, onActions },
+          { onSession, onActions, onSessionEnd },
         )) {
           acc += chunk;
           setStreamingText(acc);
@@ -273,7 +281,7 @@ export default function ChatPage() {
               sessionId: currentSessionId,
               messages: msgs,
             },
-            { onSession, onActions },
+            { onSession, onActions, onSessionEnd },
           )) {
             acc += chunk;
             setStreamingText(acc);
@@ -769,6 +777,13 @@ export default function ChatPage() {
   ) : null;
 
   return (
+    <>
+    {endedSessionId && (
+      <SessionRecapOverlay
+        sessionId={endedSessionId}
+        onClose={() => setEndedSessionId(null)}
+      />
+    )}
     <div
       style={{
         height: "100vh",
@@ -1063,6 +1078,7 @@ export default function ChatPage() {
         </div>
       )}
     </div>
+    </>
   );
 }
 

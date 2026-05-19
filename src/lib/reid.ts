@@ -9,6 +9,10 @@ export interface StreamReidOptions {
    *  model finishes when sentinels fired. The marker line is stripped from
    *  the yielded text stream — callers only see the prose. */
   onActions?: (actionTypes: string[]) => void;
+  /** Called once with the resolved sessionId when the server signals that
+   *  the session has ended (SESSION_COMPLETE sentinel or 20-message hard
+   *  cap). The chat UI uses this to open the recap overlay. */
+  onSessionEnd?: (sessionId: string) => void;
   /** Optional AbortSignal for cancellation. */
   signal?: AbortSignal;
 }
@@ -91,16 +95,15 @@ export async function* streamReid(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
 
-  // The server may append a trailing marker AFTER the model finishes:
-  //   "\x1eREID_ACTIONS:[\"observation_created\",...]\n"
-  // It's only present when sentinels fired. To strip it from the yielded
-  // prose, we accumulate decoded chunks in `textBuffer` and only yield text
-  // that we're sure is BEFORE the marker. A 64-byte holdback covers the case
-  // where the marker straddles two network chunks (the marker itself plus
-  // its JSON payload is comfortably shorter than that headroom is large).
+  // The server may append one or more trailing markers AFTER the model
+  // finishes. Each marker has the shape:
+  //   "\x1e<KEY>:<json>\n"
+  // Known keys: REID_ACTIONS, REID_SESSION_END. To strip them from the
+  // yielded prose we accumulate decoded chunks in `textBuffer` and only
+  // yield text that we're sure is BEFORE the first marker. A 128-byte
+  // holdback covers the case where a marker straddles two network chunks.
   const MARKER = "\x1e";
-  const PREFIX = "REID_ACTIONS:";
-  const HOLDBACK = 64;
+  const HOLDBACK = 128;
   let textBuffer = "";
   let markerSeen = false;
 
@@ -110,43 +113,57 @@ export async function* streamReid(
     if (!value) continue;
     textBuffer += decoder.decode(value, { stream: true });
 
-    const markerIdx = textBuffer.indexOf(MARKER);
-    if (markerIdx === -1) {
-      // No marker yet — emit everything except the trailing HOLDBACK bytes.
-      const safeEmitLen = Math.max(0, textBuffer.length - HOLDBACK);
-      if (safeEmitLen > 0) {
-        yield textBuffer.slice(0, safeEmitLen);
-        textBuffer = textBuffer.slice(safeEmitLen);
-      }
-    } else {
-      // Marker found. Yield text up to (but not including) the \x1e, then
-      // parse the suffix as the action trailer. Anything after the marker
-      // (including a trailing newline) is dropped — the server contract is
-      // that the marker is the very last thing on the wire.
-      if (markerIdx > 0) yield textBuffer.slice(0, markerIdx);
-      const suffix = textBuffer.slice(markerIdx + MARKER.length);
-      textBuffer = "";
-      markerSeen = true;
-      if (suffix.startsWith(PREFIX)) {
-        const jsonPart = suffix.slice(PREFIX.length).split("\n")[0];
-        try {
-          const arr = JSON.parse(jsonPart);
-          if (Array.isArray(arr)) {
-            options.onActions?.(
-              arr.filter((s): s is string => typeof s === "string"),
-            );
-          }
-        } catch {
-          // Malformed trailer — ignore. The prose has already been yielded.
+    if (!markerSeen) {
+      const markerIdx = textBuffer.indexOf(MARKER);
+      if (markerIdx === -1) {
+        // No marker yet — emit everything except the trailing HOLDBACK bytes.
+        const safeEmitLen = Math.max(0, textBuffer.length - HOLDBACK);
+        if (safeEmitLen > 0) {
+          yield textBuffer.slice(0, safeEmitLen);
+          textBuffer = textBuffer.slice(safeEmitLen);
         }
+      } else {
+        // First marker found. Yield text up to (but not including) the \x1e,
+        // then keep buffering — multiple markers may follow.
+        if (markerIdx > 0) yield textBuffer.slice(0, markerIdx);
+        textBuffer = textBuffer.slice(markerIdx);
+        markerSeen = true;
       }
-      break;
     }
   }
 
-  // Flush any remaining text that was held back by the safety window. Only
-  // applies when the stream ended without a marker (the common case).
-  if (!markerSeen && textBuffer.length > 0) {
-    yield textBuffer;
+  if (!markerSeen) {
+    // Stream ended without ever seeing a marker — flush the held-back tail.
+    if (textBuffer.length > 0) yield textBuffer;
+    return;
+  }
+
+  // Parse every \x1e<KEY>:<json>\n segment in the trailer buffer.
+  const segments = textBuffer
+    .split(MARKER)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  for (const seg of segments) {
+    const colonIdx = seg.indexOf(":");
+    if (colonIdx === -1) continue;
+    const key = seg.slice(0, colonIdx);
+    const jsonPart = seg.slice(colonIdx + 1).split("\n")[0];
+    try {
+      const parsed = JSON.parse(jsonPart);
+      if (key === "REID_ACTIONS" && Array.isArray(parsed)) {
+        options.onActions?.(
+          parsed.filter((s): s is string => typeof s === "string"),
+        );
+      } else if (
+        key === "REID_SESSION_END" &&
+        parsed &&
+        typeof parsed === "object" &&
+        typeof (parsed as { session_id?: unknown }).session_id === "string"
+      ) {
+        options.onSessionEnd?.((parsed as { session_id: string }).session_id);
+      }
+    } catch {
+      // Malformed trailer — ignore.
+    }
   }
 }
