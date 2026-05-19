@@ -640,14 +640,18 @@ export async function POST(req: NextRequest) {
               await createGoalsFromOnboarding(db, userId, ob.goals);
             }
 
-            // Process the remaining sentinels (goal updates, email,
-            // session-complete) but skip onboarding-complete since we
-            // already handled it inline.
+            // Process remaining sentinels (goal updates, email) but skip
+            // onboarding-complete (handled inline) AND session-complete:
+            // the model often emits both at onboarding wrap-up, and the
+            // SESSION_COMPLETE branch in processSentinels would bump
+            // users.session_count to 1, pushing a new user to "1 of 3"
+            // before their first real chat.
             await processSentinels(
               db,
               {
                 ...parsed,
                 onboardingComplete: null,
+                sessionComplete: null,
               },
               userId,
               resolvedSessionId,
