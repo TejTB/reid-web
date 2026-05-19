@@ -1,22 +1,17 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { motion, type Variants } from "framer-motion";
 import { ArrowRight, Check } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
 import { GlowCard } from "@/components/ui/glow-card";
 import PushOptInBanner from "@/components/PushOptInBanner";
-import ObservationsCard from "@/components/ObservationsCard";
+import StreakIndicator from "@/components/StreakIndicator";
 import { useAuth } from "@/components/AuthProvider";
+import { supabase } from "@/lib/supabase";
 import { FREE_SESSIONS } from "@/lib/session";
-import type { User } from "@/types/db";
-
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
+import type { Observation, User } from "@/types/db";
 
 type LoadedUser = Pick<
   User,
@@ -25,50 +20,101 @@ type LoadedUser = Pick<
   | "onboarding_complete"
   | "onboarding_summary"
   | "onboarding_task"
+  | "onboarding_task_completed_at"
   | "last_session_at"
   | "session_count"
   | "streak_days"
+  | "subscription_status"
 >;
 
-// Bucketed milestone copy for the momentum bar — the visual bar caps at 100%
-// when the user reaches FREE_SESSIONS; pro users continue to see milestone
-// labels progress past that.
-function milestoneFor(sessionCount: number): string {
-  if (sessionCount <= 1) return "Getting started";
-  if (sessionCount < FREE_SESSIONS) return "Building momentum";
-  if (sessionCount === FREE_SESSIONS) return "First checkpoint";
+function timeGreeting(now: Date = new Date()): string {
+  const h = now.getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function daysSince(iso: string | null | undefined, now: Date = new Date()): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const last = new Date(iso);
+  const lastStart = new Date(last.getFullYear(), last.getMonth(), last.getDate()).getTime();
+  const dayMs = 1000 * 60 * 60 * 24;
+  return Math.max(0, Math.round((start - lastStart) / dayMs));
+}
+
+function subtitleFor(days: number | null): string {
+  if (days == null) return "Here's where things stand.";
+  if (days === 0) return "Here's where things stand.";
+  if (days === 1) return "Reid's been thinking since yesterday.";
+  if (days === 2) return "Two days. Reid's been watching.";
+  return `${days} days. Reid's been waiting.`;
+}
+
+function continueCopyFor(days: number | null): string {
+  if (days == null || days === 0) return "Pick up where you left off.";
+  if (days === 1) return "Reid's been thinking overnight.";
+  return "Reid has questions.";
+}
+
+function milestoneLabel(sessionCount: number, isPro: boolean): string {
+  if (isPro) return `Unlimited · Session ${sessionCount}`;
+  if (sessionCount === 0) return "New ground";
+  if (sessionCount === 1) return "Stacking sessions";
+  if (sessionCount === 2) return "Halfway in";
+  if (sessionCount === 3) return "Final free session — upgrade to continue";
   return "Pattern emerging";
 }
 
-// "Active today" / "{n} day streak" / "Last active {n} days ago".
-// Streak text is intentionally restrained — no fire emoji, no bold weight.
-function streakTextFor(user: LoadedUser, now: Date = new Date()): string | null {
-  const last = user.last_session_at ? new Date(user.last_session_at) : null;
-  if (last && !Number.isNaN(last.getTime())) {
-    const sameDay =
-      last.getFullYear() === now.getFullYear() &&
-      last.getMonth() === now.getMonth() &&
-      last.getDate() === now.getDate();
-    if (sameDay) return "Active today";
-  }
-  if ((user.streak_days ?? 0) > 1) return `${user.streak_days} day streak`;
-  if (last && !Number.isNaN(last.getTime())) {
-    const dayMs = 1000 * 60 * 60 * 24;
-    const days = Math.max(
-      1,
-      Math.floor((now.getTime() - last.getTime()) / dayMs),
-    );
-    return `Last active ${days} day${days === 1 ? "" : "s"} ago`;
-  }
-  return null;
+const containerVariants: Variants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.05 } },
+};
+
+const childVariants: Variants = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
+};
+
+const OBSERVATION_CATEGORY_STYLES: Record<string, string> = {
+  avoidance: "bg-[#B91C1C]/15 text-[#f87171] border border-[#B91C1C]/25",
+  pattern: "bg-amber-900/20 text-amber-400 border border-amber-700/30",
+  contradiction: "bg-purple-900/20 text-purple-400 border border-purple-700/30",
+  strength: "bg-green-900/20 text-green-400 border border-green-700/30",
+};
+
+function ObservationBadge({ category }: { category: string }) {
+  return (
+    <span
+      className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-sans ${
+        OBSERVATION_CATEGORY_STYLES[category] ?? OBSERVATION_CATEGORY_STYLES.avoidance
+      }`}
+    >
+      {category}
+    </span>
+  );
+}
+
+function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+interface TaskRow {
+  id: string;
+  text: string;
+  completedAt: string | null;
 }
 
 export default function HomePage() {
   const router = useRouter();
   const { me, session, loading } = useAuth();
-  const [user, setUser] = useState<LoadedUser | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [taskDone, setTaskDone] = useState(false);
+  const [taskOverride, setTaskOverride] = useState<TaskRow | null>(null);
+  const [observations, setObservations] = useState<Observation[]>([]);
+  const [observationsLoaded, setObservationsLoaded] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -76,37 +122,94 @@ export default function HomePage() {
       router.replace("/login");
       return;
     }
-    if (!me) {
-      return;
-    }
-    if (!me.onboarding_complete) {
+    if (me && !me.onboarding_complete) {
       router.replace("/onboarding");
-      return;
     }
+  }, [loading, me, session, router]);
+
+  const user: LoadedUser | null = me && me.onboarding_complete ? me : null;
+
+  const baseTasks: TaskRow[] = useMemo(() => {
+    if (!user) return [];
+    const task = user.onboarding_task?.trim();
+    if (!task) return [];
+    return [
+      {
+        id: user.id,
+        text: task,
+        completedAt: user.onboarding_task_completed_at ?? null,
+      },
+    ];
+  }, [user]);
+
+  const tasks: TaskRow[] = useMemo(() => {
+    if (!taskOverride) return baseTasks;
+    return baseTasks.map((t) =>
+      t.id === taskOverride.id ? taskOverride : t,
+    );
+  }, [baseTasks, taskOverride]);
+
+  useEffect(() => {
+    if (!user?.id) return;
     let cancelled = false;
     void (async () => {
+      const { data } = await supabase
+        .from("observations")
+        .select("id, user_id, session_id, text, confidence, category, created_at")
+        .order("created_at", { ascending: false })
+        .limit(3);
       if (cancelled) return;
-      setUser(me);
-      let done = false;
-      try {
-        done =
-          localStorage.getItem(`reid:task:${me.id}:0:done`) === "true";
-      } catch {
-        done = false;
-      }
-      if (cancelled) return;
-      setTaskDone(done);
-      setLoaded(true);
+      setObservations((data ?? []) as Observation[]);
+      setObservationsLoaded(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [loading, me, session, router]);
+  }, [user?.id]);
+
+  const days = useMemo(
+    () => daysSince(user?.last_session_at ?? null),
+    [user?.last_session_at],
+  );
+
+  async function toggleTask(task: TaskRow) {
+    if (!user) return;
+    const nextCompleted = !task.completedAt;
+    const optimisticStamp = nextCompleted ? new Date().toISOString() : null;
+    const previousOverride = taskOverride;
+    setTaskOverride({ ...task, completedAt: optimisticStamp });
+
+    let accessToken: string | null = null;
+    try {
+      const { data } = await supabase.auth.getSession();
+      accessToken = data.session?.access_token ?? null;
+    } catch {
+      accessToken = null;
+    }
+
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/complete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+        body: JSON.stringify({ completed: nextCompleted }),
+      });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+    } catch (err) {
+      console.error("[home] task toggle failed:", err);
+      setTaskOverride(previousOverride);
+    }
+  }
 
   if (!loading && session && !me) {
     return (
       <div className="mx-auto w-full max-w-[480px] px-6 pt-[80px] pb-12 flex flex-col gap-6 text-center">
-        <h1 className="font-serif text-text-primary text-[28px]" style={{ fontWeight: 500, letterSpacing: "-0.02em" }}>
+        <h1
+          className="font-serif text-text-primary text-[28px]"
+          style={{ fontWeight: 500, letterSpacing: "-0.02em" }}
+        >
           Something&apos;s off with your account.
         </h1>
         <p className="font-sans text-text-dim text-[15px]" style={{ lineHeight: 1.55 }}>
@@ -136,7 +239,7 @@ export default function HomePage() {
     );
   }
 
-  if (!loaded) {
+  if (!user) {
     return (
       <div className="mx-auto w-full max-w-[720px] px-6 pt-[60px] pb-12 flex flex-col gap-4">
         <div className="h-12 w-2/3 rounded-md bg-bg-card animate-skeleton" />
@@ -146,68 +249,54 @@ export default function HomePage() {
     );
   }
 
-  const summary = user?.onboarding_summary?.trim() ?? "";
-  const task = user?.onboarding_task?.trim() ?? "";
-  const greetName = user?.name?.trim() || "there";
-  const sessionCount = user?.session_count ?? 0;
-  const streakText = user ? streakTextFor(user) : null;
-  const milestoneLabel = milestoneFor(sessionCount);
-  const progressPct = Math.min(100, (sessionCount / FREE_SESSIONS) * 100);
+  const summary = user.onboarding_summary?.trim() ?? "";
+  const greetName = user.name?.trim() || "there";
+  const sessionCount = user.session_count ?? 0;
+  const isPro = user.subscription_status === "pro";
+  const milestone = milestoneLabel(sessionCount, isPro);
+  const progressPct = isPro
+    ? 100
+    : Math.min(100, (sessionCount / FREE_SESSIONS) * 100);
+  const subtitle = subtitleFor(days);
+  const continueCopy = continueCopyFor(days);
 
-  function toggleTask() {
-    if (!user) return;
-    const next = !taskDone;
-    setTaskDone(next);
-    try {
-      localStorage.setItem(
-        `reid:task:${user.id}:0:done`,
-        next ? "true" : "false",
-      );
-    } catch {
-      // localStorage unavailable; in-memory state still reflects the toggle.
-    }
-  }
+  const doneCount = tasks.filter((t) => !!t.completedAt).length;
+  const totalTasks = tasks.length;
+  const allDone = totalTasks > 0 && doneCount === totalTasks;
 
   return (
-    <div className="mx-auto w-full max-w-[720px] px-6 md:px-6 pt-[60px] pb-12 flex flex-col">
-      {user && (
-        <PushOptInBanner
-          name={user.name}
-          sessionCount={sessionCount}
-        />
-      )}
-      <div
-        className="animate-fade-up"
-        style={{ animationDelay: "0ms" }}
-      >
+    <motion.div
+      className="mx-auto w-full max-w-[720px] px-6 md:px-6 pt-[60px] pb-12 flex flex-col"
+      variants={containerVariants}
+      initial="hidden"
+      animate="show"
+    >
+      <PushOptInBanner name={user.name} sessionCount={sessionCount} />
+
+      <motion.div variants={childVariants}>
         <h1
-          className="font-serif text-text-primary text-[36px] md:text-[46px]"
+          className="font-serif text-text-primary text-3xl md:text-4xl lg:text-[44px]"
           style={{
             fontWeight: 500,
             letterSpacing: "-0.03em",
             lineHeight: 1.1,
           }}
         >
-          {greeting()}, {greetName}.
+          {timeGreeting()}, {greetName}.
         </h1>
-        <p className="text-white/30 text-sm font-sans mt-2.5">
-          Here&apos;s where things stand.
-        </p>
-        {sessionCount > 0 && streakText && (
-          <p
-            className="font-sans text-text-dim text-sm"
-            style={{ marginTop: 12, fontWeight: 400 }}
-          >
-            Session {sessionCount} · {streakText}
-          </p>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-4" style={{ marginTop: 48 }}>
-        <div
-          className="animate-fade-up"
-          style={{ animationDelay: "0ms" }}
+        <p
+          className="font-sans text-text-dim"
+          style={{ fontSize: 15, marginTop: 10, lineHeight: 1.5 }}
         >
+          {subtitle}
+        </p>
+        <div style={{ marginTop: 12 }}>
+          <StreakIndicator days={user.streak_days ?? 0} />
+        </div>
+      </motion.div>
+
+      <div className="flex flex-col" style={{ marginTop: 32, gap: 16 }}>
+        <motion.div variants={childVariants}>
           <GlowCard customSize glowColor="red" className="w-full">
             <GlassCard title="YOUR FOCUS">
               {summary ? (
@@ -222,9 +311,6 @@ export default function HomePage() {
                   Complete your first session with Reid.
                 </p>
               )}
-              {/* Momentum bar — caps visually at 100% when sessionCount hits
-                  FREE_SESSIONS; milestone label keeps progressing past that
-                  for Pro users. */}
               <div className="mt-4">
                 <div className="h-1 bg-white/5 rounded-full overflow-hidden">
                   <div
@@ -233,76 +319,142 @@ export default function HomePage() {
                   />
                 </div>
                 <p className="mt-2 text-xs text-text-dim font-sans">
-                  Session {sessionCount} of {FREE_SESSIONS} — {milestoneLabel}
+                  {milestone}
                 </p>
               </div>
             </GlassCard>
           </GlowCard>
-        </div>
+        </motion.div>
 
-        <div
-          className="animate-fade-up"
-          style={{ animationDelay: "80ms" }}
-        >
+        <motion.div variants={childVariants}>
           <GlowCard customSize glowColor="red" className="w-full">
             <GlassCard title="TODAY'S TASK">
-              {task ? (
-                <div className="flex items-start" style={{ gap: 14 }}>
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={taskDone}
-                    aria-label={taskDone ? "Mark task incomplete" : "Mark task complete"}
-                    onClick={toggleTask}
-                    className="flex items-center justify-center shrink-0"
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      border: taskDone
-                        ? "1.5px solid transparent"
-                        : "1.5px solid rgba(255,255,255,0.2)",
-                      background: taskDone ? "#B91C1C" : "transparent",
-                      cursor: "pointer",
-                      transition: "all 200ms ease",
-                      marginTop: 2,
-                    }}
-                  >
-                    {taskDone && (
-                      <Check size={12} strokeWidth={2.5} color="#F2EDE3" />
-                    )}
-                  </button>
-                  <p
-                    className="font-sans"
-                    style={{
-                      fontSize: 16,
-                      fontWeight: 400,
-                      color: taskDone ? "#7A90A8" : "#F2EDE3",
-                      textDecoration: taskDone ? "line-through" : "none",
-                      transition:
-                        "color 300ms ease, text-decoration-color 300ms ease",
-                      lineHeight: 1.55,
-                    }}
-                  >
-                    {task}
-                  </p>
-                </div>
-              ) : (
+              {totalTasks === 0 ? (
                 <p
                   className="font-sans"
                   style={{ fontSize: 15, color: "#7A90A8" }}
                 >
                   Reid will assign your task at the end of your next session.
                 </p>
+              ) : allDone ? (
+                <div className="font-serif italic text-text-primary text-[20px] leading-[1.5] [text-wrap:pretty]">
+                  <p>All done.</p>
+                  <p>Reid will assign more next session.</p>
+                </div>
+              ) : (
+                <>
+                  <ul
+                    className="flex flex-col"
+                    style={{ gap: 12, listStyle: "none", padding: 0, margin: 0 }}
+                  >
+                    {tasks.map((t) => {
+                      const done = !!t.completedAt;
+                      return (
+                        <li key={t.id} className="flex items-start" style={{ gap: 14 }}>
+                          <button
+                            type="button"
+                            role="checkbox"
+                            aria-checked={done}
+                            aria-label={done ? "Mark task incomplete" : "Mark task complete"}
+                            onClick={() => toggleTask(t)}
+                            className="flex items-center justify-center shrink-0"
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: "50%",
+                              border: done
+                                ? "1.5px solid transparent"
+                                : "1.5px solid rgba(255,255,255,0.2)",
+                              background: done ? "#B91C1C" : "transparent",
+                              cursor: "pointer",
+                              transition: "background-color 200ms ease, border-color 200ms ease, opacity 200ms ease",
+                              marginTop: 2,
+                            }}
+                          >
+                            {done && (
+                              <Check size={12} strokeWidth={2.5} color="#F2EDE3" />
+                            )}
+                          </button>
+                          <p
+                            className="font-sans"
+                            style={{
+                              fontSize: 16,
+                              fontWeight: 400,
+                              color: done ? "#7A90A8" : "#F2EDE3",
+                              textDecoration: done ? "line-through" : "none",
+                              opacity: done ? 0.5 : 1,
+                              transition: "color 300ms ease, opacity 300ms ease",
+                              lineHeight: 1.55,
+                            }}
+                          >
+                            {t.text}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p
+                    className="font-sans text-text-dim"
+                    style={{ fontSize: 12, marginTop: 16 }}
+                  >
+                    {totalTasks} task{totalTasks === 1 ? "" : "s"} · {doneCount} done
+                  </p>
+                </>
               )}
             </GlassCard>
           </GlowCard>
-        </div>
+        </motion.div>
 
-        <div
-          className="animate-fade-up"
-          style={{ animationDelay: "160ms" }}
-        >
+        <motion.div variants={childVariants}>
+          <div
+            className="flex items-center justify-between mb-3"
+            style={{ flexWrap: "nowrap" }}
+          >
+            <span className="text-xs text-white/30 uppercase tracking-widest font-sans whitespace-nowrap">
+              What Reid Noticed
+            </span>
+            <Link
+              href="/observations"
+              className="text-xs text-white/25 hover:text-white/50 transition-colors font-sans whitespace-nowrap"
+            >
+              See all →
+            </Link>
+          </div>
+          {!observationsLoaded ? (
+            <div className="h-20 rounded-2xl bg-bg-card animate-skeleton" />
+          ) : observations.length === 0 ? (
+            <GlowCard customSize glowColor="red" className="w-full">
+              <div style={{ padding: 24 }}>
+                <p
+                  className="font-serif italic text-text-primary [text-wrap:pretty]"
+                  style={{ fontSize: 18, lineHeight: 1.5 }}
+                >
+                  Nothing yet. Give me a session and I&apos;ll start building a picture.
+                </p>
+              </div>
+            </GlowCard>
+          ) : (
+            <div className="flex flex-col" style={{ gap: 8 }}>
+              {observations.slice(0, 3).map((o) => (
+                <GlowCard key={o.id} customSize glowColor="red" className="w-full">
+                  <div className="px-4 py-3 bg-[#111111] rounded-xl">
+                    <div className="flex items-center justify-between mb-2">
+                      <ObservationBadge category={o.category ?? "avoidance"} />
+                      <span className="text-white/20 text-xs font-sans">
+                        {formatShortDate(o.created_at)}
+                      </span>
+                    </div>
+                    <p className="text-white/65 text-sm font-serif italic leading-relaxed line-clamp-2 [text-wrap:pretty]">
+                      {o.text}
+                    </p>
+                  </div>
+                </GlowCard>
+              ))}
+            </div>
+          )}
+        </motion.div>
+
+        <motion.div variants={childVariants}>
           <GlowCard customSize glowColor="red" className="w-full">
             <GlassCard title="CONTINUE">
               <p
@@ -313,7 +465,7 @@ export default function HomePage() {
                   marginBottom: 20,
                 }}
               >
-                Your co-founder is ready.
+                {continueCopy}
               </p>
               <Link
                 href="/chat"
@@ -332,13 +484,8 @@ export default function HomePage() {
               </Link>
             </GlassCard>
           </GlowCard>
-
-          {/* Self-hides when there are no observations yet, so brand-new
-              founders don't see dead surface area. */}
-          {user && <ObservationsCard userId={user.id} />}
-        </div>
+        </motion.div>
       </div>
-
-    </div>
+    </motion.div>
   );
 }
