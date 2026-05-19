@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { motion } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
 import {
   getMyGoals,
@@ -16,26 +17,11 @@ import GoalCard from "@/components/GoalCard";
 import GoalEventFeed from "@/components/GoalEventFeed";
 import GoalCompleteOverlay from "@/components/GoalCompleteOverlay";
 import CompletedGoalsSection from "@/components/CompletedGoalsSection";
+import LogoMark from "@/components/LogoMark";
 import { GlowCard } from "@/components/ui/glow-card";
 
 const FLASH_MS = 2000;
 
-/** Goals dashboard.
- *
- *  Loads goals + recent events in parallel for the current user, then opens
- *  a Realtime subscription on both tables. Realtime events drive three
- *  things:
- *    1. Splice the updated row into local goals state.
- *    2. Mark the affected goal id as recently-updated for 2s so the card
- *       can pulse via the goal-flash keyframe.
- *    3. Detect the null → timestamp transition on completed_at and show
- *       the completion overlay.
- *  On a goal_events INSERT we just refetch the feed — it's bounded (~30
- *  rows) and refetching keeps ordering deterministic without merging the
- *  realtime row by hand.
- *
- *  No service-role key — RLS on public.goals / public.goal_events is
- *  anon-permissive (see migration 20260516180000). */
 export default function GoalsPage() {
   const router = useRouter();
   const { me, loading: authLoading } = useAuth();
@@ -48,12 +34,8 @@ export default function GoalsPage() {
     () => new Set(),
   );
   const [completedGoal, setCompletedGoal] = useState<Goal | null>(null);
-  // Tracks goals we've already celebrated this session so a re-render of
-  // the overlay doesn't double-fire if Realtime echoes back.
   const celebratedRef = useRef<Set<string>>(new Set());
 
-  // Bring `userId` into a stable ref so the Realtime callback can refetch
-  // events without re-subscribing on every state change.
   const userIdRef = useRef<string | null>(null);
   useEffect(() => {
     userIdRef.current = userId;
@@ -75,7 +57,6 @@ export default function GoalsPage() {
     }, FLASH_MS);
   }, []);
 
-  // Initial load.
   useEffect(() => {
     if (authLoading) return;
     if (!me) {
@@ -107,7 +88,6 @@ export default function GoalsPage() {
     };
   }, [authLoading, me, router]);
 
-  // Realtime subscription. Re-subscribes only when userId changes.
   useEffect(() => {
     if (!userId) return;
 
@@ -124,9 +104,6 @@ export default function GoalsPage() {
         (payload) => {
           const row = (payload.new ?? null) as Goal | null;
           if (!row || !row.id) {
-            // DELETE — drop the row from state. The brief doesn't surface
-            // a delete flow in the UI but we want the page to stay coherent
-            // if a row disappears.
             const oldRow = (payload.old ?? null) as Partial<Goal> | null;
             if (oldRow?.id) {
               setGoals((prev) => prev.filter((g) => g.id !== oldRow.id));
@@ -138,7 +115,6 @@ export default function GoalsPage() {
             const next = before
               ? prev.map((g) => (g.id === row.id ? row : g))
               : [...prev, row].sort((a, b) => {
-                  // Mirror getGoals: primary first, then oldest-first by created_at.
                   if (a.is_primary !== b.is_primary)
                     return a.is_primary ? -1 : 1;
                   return (
@@ -146,8 +122,6 @@ export default function GoalsPage() {
                     new Date(b.created_at).getTime()
                   );
                 });
-            // Completion detection (local-state version — survives a
-            // partial `old` payload from REPLICA IDENTITY DEFAULT).
             if (
               row.completed_at &&
               before &&
@@ -171,8 +145,6 @@ export default function GoalsPage() {
           filter: `user_id=eq.${userId}`,
         },
         () => {
-          // Refetch — cheap (limit 30) and keeps deterministic order +
-          // joined goal title/unit without merge gymnastics.
           const id = userIdRef.current;
           if (!id) return;
           void getMyGoalEvents(30).then((rows) => {
@@ -194,26 +166,52 @@ export default function GoalsPage() {
   const supportingGoals = activeGoals.filter((g) => g.id !== primary?.id);
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
       className="mx-auto w-full max-w-[1100px] px-6 md:px-8"
       style={{ paddingTop: 56, paddingBottom: 48 }}
     >
       <header style={{ marginBottom: 40 }}>
-        <h1 className="font-serif text-3xl text-white mb-1">Your Goals</h1>
-        <p className="text-white/30 text-sm font-sans">
-          The numbers Reid is helping you move.
+        <h1
+          className="font-serif text-text-primary"
+          style={{
+            fontSize: 36,
+            fontWeight: 500,
+            letterSpacing: "-0.025em",
+            lineHeight: 1.1,
+          }}
+        >
+          Your Goals
+        </h1>
+        <p
+          className="font-sans"
+          style={{ color: "#7A90A8", fontSize: 15, marginTop: 8 }}
+        >
+          What you said you wanted. Reid&apos;s holding you to it.
         </p>
       </header>
 
       {error ? (
         <div className="flex flex-col items-center justify-center pt-16 gap-4">
-          <p className="font-serif italic text-text-dim text-lg">
-            Something went wrong.
+          <p
+            className="font-serif italic"
+            style={{ fontSize: 18, color: "#7A90A8" }}
+          >
+            My end&apos;s jammed.
           </p>
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="text-sm text-accent underline font-sans"
+            className="font-sans"
+            style={{
+              fontSize: 13,
+              color: "#B91C1C",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+            }}
           >
             Try again
           </button>
@@ -223,45 +221,49 @@ export default function GoalsPage() {
       ) : activeGoals.length === 0 && completedGoals.length === 0 ? (
         <GoalsEmptyState />
       ) : (
-        <div className="flex flex-col lg:flex-row" style={{ gap: 32 }}>
-          {/* Left column: hero + supporting grid + completed shelf. */}
-          <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 20 }}>
+        <div
+          className="grid grid-cols-1 md:grid-cols-3"
+          style={{ gap: 32 }}
+        >
+          <div className="md:col-span-2 flex flex-col" style={{ gap: 20 }}>
             {primary ? (
-              <div className="animate-fade-up" style={{ animationDelay: "0ms" }}>
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0 }}
+              >
                 <GlowCard customSize glowColor="red" className="w-full">
                   <PrimaryGoalHero
                     goal={primary}
                     flash={recentlyUpdated.has(primary.id)}
                   />
                 </GlowCard>
-              </div>
+              </motion.div>
             ) : (
-              // No active goals but we DO have completed ones — render a
-              // light prompt instead of the hero so the page still feels
-              // alive.
-              <div
-                className="animate-fade-up"
-                style={{ animationDelay: "0ms" }}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
               >
                 <GlowCard customSize glowColor="red" className="w-full">
-                  <div className="home-card">
+                  <div style={{ padding: "24px" }}>
                     <p
                       className="font-serif italic text-text-secondary [text-wrap:pretty]"
                       style={{ fontSize: 18, lineHeight: 1.5 }}
                     >
                       Every active goal is done. Open a session and tell Reid
-                      what's next.
+                      what&apos;s next.
                     </p>
                     <Link
                       href="/chat"
                       className="cta-shadow inline-flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-text-primary transition-all duration-200 hover:-translate-y-px"
                       style={{
                         marginTop: 18,
-                        height: 42,
+                        height: 48,
                         padding: "0 22px",
-                        borderRadius: 9,
+                        borderRadius: 10,
                         fontFamily: "var(--font-sans), sans-serif",
-                        fontSize: 13,
+                        fontSize: 14,
                         fontWeight: 500,
                         letterSpacing: "0.04em",
                       }}
@@ -271,40 +273,51 @@ export default function GoalsPage() {
                     </Link>
                   </div>
                 </GlowCard>
-              </div>
+              </motion.div>
             )}
 
             {supportingGoals.length > 0 && (
-              <div
-                className="grid animate-fade-up"
-                style={{
-                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-                  gap: 16,
-                  animationDelay: "80ms",
+              <motion.div
+                initial="hidden"
+                animate="visible"
+                variants={{
+                  hidden: {},
+                  visible: { transition: { staggerChildren: 0.06 } },
                 }}
+                className="grid grid-cols-1 sm:grid-cols-2"
+                style={{ gap: 16 }}
               >
                 {supportingGoals.map((g) => (
-                  <GoalCard
+                  <motion.div
                     key={g.id}
-                    goal={g}
-                    flash={recentlyUpdated.has(g.id)}
-                  />
+                    variants={{
+                      hidden: { opacity: 0, y: 12 },
+                      visible: { opacity: 1, y: 0 },
+                    }}
+                    transition={{ duration: 0.35 }}
+                  >
+                    <GoalCard
+                      goal={g}
+                      flash={recentlyUpdated.has(g.id)}
+                    />
+                  </motion.div>
                 ))}
-              </div>
+              </motion.div>
             )}
 
             <CompletedGoalsSection goals={completedGoals} />
           </div>
 
-          {/* Right rail: feed. */}
-          <div
-            className="lg:w-[300px] lg:shrink-0 animate-fade-up"
-            style={{ animationDelay: "160ms" }}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.12 }}
+            className="md:col-span-1"
           >
             <GlowCard customSize glowColor="red" className="w-full">
               <GoalEventFeed events={events} />
             </GlowCard>
-          </div>
+          </motion.div>
         </div>
       )}
 
@@ -314,59 +327,73 @@ export default function GoalsPage() {
           onDismiss={() => setCompletedGoal(null)}
         />
       )}
-    </div>
+    </motion.div>
   );
 }
 
-/** Shown when the user has no goals at all. Routes them back to Reid where
- *  goals get captured. */
 function GoalsEmptyState() {
   return (
-    <div className="home-card flex flex-col items-start" style={{ gap: 20 }}>
-      <p
-        className="font-serif italic text-text-secondary [text-wrap:pretty]"
-        style={{ fontSize: 20, lineHeight: 1.55 }}
-      >
-        No goals yet. Open a session and tell Reid the number you're trying
-        to move — he'll keep score from there.
-      </p>
+    <div
+      className="flex flex-col items-center justify-center text-center animate-fade-up"
+      style={{ paddingTop: 64, paddingBottom: 80, gap: 24 }}
+    >
+      <LogoMark size={64} glow={false} />
+      <div className="flex flex-col" style={{ gap: 8 }}>
+        <h2
+          className="font-serif italic"
+          style={{
+            fontSize: 32,
+            fontWeight: 400,
+            color: "#F2EDE3",
+            letterSpacing: "-0.02em",
+            lineHeight: 1.2,
+          }}
+        >
+          No goals yet.
+        </h2>
+        <p
+          className="font-sans"
+          style={{
+            fontSize: 16,
+            color: "#7A90A8",
+            lineHeight: 1.55,
+            maxWidth: 380,
+          }}
+        >
+          They&apos;ll appear after our first real session.
+        </p>
+      </div>
       <Link
         href="/chat"
         className="cta-shadow inline-flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-text-primary transition-all duration-200 hover:-translate-y-px"
         style={{
-          height: 46,
+          height: 48,
           padding: "0 22px",
-          borderRadius: 9,
+          borderRadius: 10,
           fontFamily: "var(--font-sans), sans-serif",
-          fontSize: 13,
+          fontSize: 14,
           fontWeight: 500,
           letterSpacing: "0.04em",
         }}
       >
-        <span>Open session with Reid</span>
+        <span>Open session</span>
         <ArrowRight size={16} strokeWidth={2} />
       </Link>
     </div>
   );
 }
 
-/** Layout-matched skeleton — same column structure as the loaded view, so
- *  the page doesn't shift when content arrives. Pure white/03 blocks; no
- *  accent red on the loading state. */
 function GoalsSkeleton() {
   return (
-    <div className="flex flex-col lg:flex-row" style={{ gap: 32 }}>
-      <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 20 }}>
+    <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: 32 }}>
+      <div className="md:col-span-2 flex flex-col" style={{ gap: 20 }}>
         <div
           className="rounded-2xl animate-pulse"
           style={{ height: 240, background: "rgba(255,255,255,0.03)" }}
         />
         <div
-          className="grid"
-          style={{
-            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-            gap: 16,
-          }}
+          className="grid grid-cols-1 sm:grid-cols-2"
+          style={{ gap: 16 }}
         >
           <div
             className="rounded-2xl animate-pulse"
@@ -387,7 +414,7 @@ function GoalsSkeleton() {
         </div>
       </div>
       <div
-        className="lg:w-[300px] lg:shrink-0 rounded-2xl animate-pulse"
+        className="md:col-span-1 rounded-2xl animate-pulse"
         style={{
           height: 360,
           background: "rgba(255,255,255,0.03)",

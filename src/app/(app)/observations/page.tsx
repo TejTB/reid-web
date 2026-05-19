@@ -1,13 +1,13 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
 import { GlowCard } from "@/components/ui/glow-card";
 import { supabase } from "@/lib/supabase";
 import { triggerObserve } from "@/lib/observe-trigger";
-import type { Observation, ObservationCategory } from "@/types/db";
+import type { Observation } from "@/types/db";
 
 const CATEGORY_STYLES: Record<string, string> = {
   avoidance:     "bg-[#B91C1C]/15 text-[#f87171] border border-[#B91C1C]/25",
@@ -25,16 +25,6 @@ function CategoryBadge({ category }: { category: string }) {
     </span>
   );
 }
-
-// Read-only feed of every observation Reid has noted about the founder.
-// Two sources land here:
-//   1. /api/reid emits [OBSERVATION] sentinels during a chat session (legacy
-//      shape — confidence only, no category).
-//   2. /api/observe writes 1–2 clinical notes after each session in the new
-//      avoidance / pattern / contradiction / strength taxonomy.
-//
-// New rows get the coloured category badge; legacy rows fall back to a
-// neutral "noted" badge. RLS scopes every read to the signed-in user.
 
 const MONTHS_SHORT = [
   "Jan",
@@ -56,25 +46,6 @@ function formatShortDate(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}`;
-}
-
-const CATEGORY_COLOURS: Record<ObservationCategory, string> = {
-  avoidance: "#B91C1C",
-  pattern: "#d97706",
-  contradiction: "#1d4ed8",
-  strength: "#16a34a",
-};
-
-const LEGACY_BADGE_COLOUR = "#3A5070";
-
-function badgeFor(o: Observation): { label: string; color: string } {
-  if (o.category) {
-    return {
-      label: o.category,
-      color: CATEGORY_COLOURS[o.category],
-    };
-  }
-  return { label: "noted", color: LEGACY_BADGE_COLOUR };
 }
 
 const OBSERVATION_SELECT =
@@ -102,9 +73,6 @@ export default function ObservationsPage() {
     return (data ?? []) as Observation[];
   }, []);
 
-  // First load: fire /api/observe for the most recent ended session that has
-  // no observations yet, then read the table. Lazy generation, single round
-  // trip in the cold path.
   useEffect(() => {
     if (authLoading) return;
     if (!me) {
@@ -133,8 +101,7 @@ export default function ObservationsPage() {
           }
         }
       } catch {
-        // Best-effort; failure here just means we render whatever's already
-        // in the table.
+        // Best-effort generation; render whatever the table holds.
       }
       if (cancelled) return;
       const rows = await fetchObservations();
@@ -147,8 +114,6 @@ export default function ObservationsPage() {
     };
   }, [authLoading, me, router, fetchObservations]);
 
-  // Re-fetch when the tab regains focus so a session ended elsewhere lands
-  // here without a manual refresh.
   useEffect(() => {
     if (!loaded) return;
     function onFocus() {
@@ -172,19 +137,34 @@ export default function ObservationsPage() {
   }
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
       className="mx-auto"
-      style={{ maxWidth: 880, padding: "48px 24px 96px" }}
+      style={{ maxWidth: 960, padding: "48px 24px 96px" }}
     >
       <div
         className="flex items-start justify-between"
         style={{ gap: 16, marginBottom: 32 }}
       >
         <div>
-          <h1 className="font-serif text-3xl text-white mb-1">
+          <h1
+            className="font-serif text-text-primary"
+            style={{
+              fontSize: 36,
+              fontWeight: 500,
+              letterSpacing: "-0.025em",
+              lineHeight: 1.1,
+              marginBottom: 8,
+            }}
+          >
             What Reid&apos;s noticed
           </h1>
-          <p className="text-white/30 text-sm font-sans">
+          <p
+            className="font-sans"
+            style={{ color: "#7A90A8", fontSize: 15 }}
+          >
             Patterns Reid keeps an eye on between sessions.
           </p>
         </div>
@@ -198,32 +178,43 @@ export default function ObservationsPage() {
             width: 36,
             height: 36,
             borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.07)",
-            background: "#0F1E35",
+            border: "1px solid rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.04)",
             color: "#F2EDE3",
             cursor: refreshing ? "default" : "pointer",
-            opacity: refreshing ? 0.5 : 1,
-            transition: "opacity 150ms ease, transform 150ms ease",
+            opacity: refreshing ? 0.7 : 1,
+            transition: "background 150ms ease, border-color 150ms ease",
             flexShrink: 0,
           }}
+          onMouseEnter={(e) => {
+            if (refreshing) return;
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.18)";
+          }}
+          onMouseLeave={(e) => {
+            if (refreshing) return;
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)";
+          }}
         >
-          <RefreshCw
-            size={14}
-            strokeWidth={2}
-            style={{ opacity: refreshing ? 0.4 : 1 }}
-          />
+          {refreshing ? (
+            <Loader2 size={14} strokeWidth={2} className="animate-spin" />
+          ) : (
+            <RefreshCw size={14} strokeWidth={2} />
+          )}
         </button>
       </div>
 
       {!loaded ? (
-        <div className="flex flex-col" style={{ gap: 12 }}>
-          {[0, 1, 2].map((i) => (
+        <div
+          className="grid grid-cols-1 md:grid-cols-2"
+          style={{ gap: 16 }}
+        >
+          {[0, 1, 2, 3].map((i) => (
             <div
               key={i}
               className="animate-skeleton"
               style={{
-                height: 96,
-                borderRadius: 12,
+                height: 140,
+                borderRadius: 14,
                 background: "rgba(255,255,255,0.04)",
               }}
             />
@@ -232,72 +223,157 @@ export default function ObservationsPage() {
       ) : errored ? (
         <div
           className="flex flex-col items-center text-center"
-          style={{ padding: "64px 24px" }}
+          style={{ padding: "64px 24px", gap: 16 }}
         >
           <p
             className="font-serif italic"
             style={{
               fontSize: 18,
-              color: "rgba(242,237,227,0.45)",
+              color: "#7A90A8",
               lineHeight: 1.5,
-              maxWidth: 320,
-              marginBottom: 16,
+              maxWidth: 360,
             }}
           >
-            Couldn&apos;t load observations.
+            My end&apos;s jammed.
           </p>
           <button
             type="button"
             onClick={refresh}
             className="font-sans"
             style={{
-              fontSize: 12,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "#F2EDE3",
+              fontSize: 13,
+              color: "#B91C1C",
               background: "transparent",
-              border: "1px solid rgba(255,255,255,0.12)",
-              padding: "10px 18px",
-              borderRadius: 9,
+              border: "none",
               cursor: "pointer",
+              fontWeight: 500,
             }}
           >
             Try again
           </button>
         </div>
       ) : observations.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
-          <p className="text-white/20 text-sm italic font-serif">
-            Reid hasn&apos;t noticed anything yet.
+        <div
+          className="flex flex-col items-center text-center"
+          style={{ paddingTop: 80, paddingBottom: 80, gap: 12 }}
+        >
+          <h2
+            className="font-serif italic"
+            style={{
+              fontSize: 32,
+              fontWeight: 400,
+              color: "#F2EDE3",
+              letterSpacing: "-0.02em",
+              lineHeight: 1.2,
+            }}
+          >
+            Reid&apos;s still watching.
+          </h2>
+          <p
+            className="font-sans"
+            style={{
+              fontSize: 15,
+              color: "#7A90A8",
+              lineHeight: 1.55,
+              maxWidth: 380,
+            }}
+          >
+            Patterns take time to surface. Come back after a few sessions.
           </p>
-          <p className="text-white/10 text-xs mt-2 font-sans">Have a few real sessions.</p>
+        </div>
+      ) : observations.length === 1 ? (
+        <div
+          className="grid grid-cols-1"
+          style={{ gap: 16 }}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0 }}
+          >
+            <ObservationTile observation={observations[0]} />
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.06 }}
+          >
+            <GlowCard customSize glowColor="red" className="w-full">
+              <div
+                style={{
+                  padding: "32px 24px",
+                  minHeight: 140,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <p
+                  className="font-serif italic text-center"
+                  style={{
+                    fontSize: 16,
+                    color: "#7A90A8",
+                    lineHeight: 1.5,
+                    maxWidth: 320,
+                  }}
+                >
+                  One pattern found. Reid&apos;s looking for more.
+                </p>
+              </div>
+            </GlowCard>
+          </motion.div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 16 }}>
           {observations.map((o, i) => (
             <motion.div
               key={o.id}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: Math.min(i, 6) * 0.04 }}
+              transition={{ delay: i * 0.06 }}
             >
-              <GlowCard customSize glowColor="red" className="w-full">
-                <div className="p-5 min-h-[140px] bg-[#111111] rounded-xl">
-                  <div className="flex items-start justify-between mb-3">
-                    <CategoryBadge category={o.category ?? "avoidance"} />
-                    <span className="text-white/25 text-xs font-sans">
-                      {formatShortDate(o.created_at)}
-                    </span>
-                  </div>
-                  <p className="text-white/75 text-sm leading-relaxed font-serif italic [text-wrap:pretty]">
-                    {o.text}
-                  </p>
-                </div>
-              </GlowCard>
+              <ObservationTile observation={o} />
             </motion.div>
           ))}
         </div>
       )}
-    </div>
+    </motion.div>
+  );
+}
+
+function ObservationTile({ observation }: { observation: Observation }) {
+  return (
+    <GlowCard customSize glowColor="red" className="w-full">
+      <div
+        style={{
+          padding: "20px 22px",
+          minHeight: 140,
+          borderRadius: 14,
+        }}
+      >
+        <div
+          className="flex items-start justify-between"
+          style={{ marginBottom: 12 }}
+        >
+          <CategoryBadge category={observation.category ?? "avoidance"} />
+          <span
+            className="font-sans"
+            style={{ fontSize: 12, color: "#3A5070" }}
+          >
+            {formatShortDate(observation.created_at)}
+          </span>
+        </div>
+        <p
+          className="font-serif italic [text-wrap:pretty]"
+          style={{
+            fontSize: 14,
+            color: "rgba(242,237,227,0.78)",
+            lineHeight: 1.55,
+          }}
+        >
+          {observation.text}
+        </p>
+      </div>
+    </GlowCard>
   );
 }

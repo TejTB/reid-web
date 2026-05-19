@@ -1,19 +1,18 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
+import SettingsCard from "@/components/SettingsCard";
 import { FREE_SESSIONS, signOut } from "@/lib/session";
+import { supabase } from "@/lib/supabase";
 
-// Cap shown for free-tier session count, matched to FREE_SESSIONS so the
-// number can never visually exceed the quota.
 function clampFreeUsage(used: number): number {
   if (used <= 0) return 0;
   if (used >= FREE_SESSIONS) return FREE_SESSIONS;
   return used;
 }
 
-// "May 14, 2026" — used for "Member since". Locale-stable: the app is shipped
-// in English and we don't want Intl drift between locales.
 const JOIN_MONTHS = [
   "January",
   "February",
@@ -36,10 +35,19 @@ function formatJoinDate(iso: string | null | undefined): string {
   return `${JOIN_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
+function formatRenewDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${JOIN_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
 function openPaywall(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent("reid:open-paywall"));
 }
+
+type ResetState = "idle" | "sending" | "sent" | "error";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -47,6 +55,7 @@ export default function SettingsPage() {
   const [portalPending, setPortalPending] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
+  const [resetState, setResetState] = useState<ResetState>("idle");
 
   useEffect(() => {
     if (authLoading) return;
@@ -64,14 +73,14 @@ export default function SettingsPage() {
         setBillingError(
           body.error === "no_customer"
             ? "No billing account yet."
-            : "Couldn't open the billing portal. Try again.",
+            : "Billing portal won't open. Try again.",
         );
         setPortalPending(false);
         return;
       }
       window.location.assign(body.url);
     } catch {
-      setBillingError("Couldn't open the billing portal. Try again.");
+      setBillingError("Billing portal won't open. Try again.");
       setPortalPending(false);
     }
   }, [portalPending]);
@@ -84,20 +93,40 @@ export default function SettingsPage() {
     router.refresh();
   }, [router, signingOut]);
 
+  const onChangePassword = useCallback(async () => {
+    if (!me?.email || resetState === "sending") return;
+    setResetState("sending");
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(me.email, {
+        redirectTo:
+          typeof window !== "undefined"
+            ? `${window.location.origin}/auth/reset-password`
+            : undefined,
+      });
+      setResetState(error ? "error" : "sent");
+    } catch {
+      setResetState("error");
+    }
+  }, [me, resetState]);
+
   if (authLoading || !me) {
     return (
       <div
-        className="mx-auto w-full max-w-[560px] px-6"
+        className="mx-auto w-full max-w-[620px] px-6"
         style={{ paddingTop: 56, paddingBottom: 40 }}
       >
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col" style={{ gap: 20 }}>
           <div
-            className="rounded-[12px] bg-bg-card animate-skeleton"
-            style={{ height: 120 }}
+            className="rounded-[14px] animate-skeleton"
+            style={{ height: 160, background: "rgba(255,255,255,0.04)" }}
           />
           <div
-            className="rounded-[12px] bg-bg-card animate-skeleton"
-            style={{ height: 140, animationDelay: "100ms" }}
+            className="rounded-[14px] animate-skeleton"
+            style={{
+              height: 140,
+              background: "rgba(255,255,255,0.04)",
+              animationDelay: "100ms",
+            }}
           />
         </div>
       </div>
@@ -107,17 +136,22 @@ export default function SettingsPage() {
   const isPro = me.subscription_status === "pro";
   const usedSessions = clampFreeUsage(me.session_count ?? 0);
   const joinDate = formatJoinDate(me.created_at);
+  const renewDate = formatRenewDate(me.subscription_period_end);
+  const name = me.name?.trim() || null;
 
   return (
-    <div
-      className="mx-auto w-full max-w-[560px] px-6"
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="mx-auto w-full max-w-[620px] px-6"
       style={{ paddingTop: 56, paddingBottom: 96 }}
     >
       <header style={{ marginBottom: 40 }}>
         <h1
           className="font-serif text-text-primary"
           style={{
-            fontSize: 38,
+            fontSize: 40,
             fontWeight: 500,
             letterSpacing: "-0.025em",
             lineHeight: 1.1,
@@ -133,21 +167,112 @@ export default function SettingsPage() {
         </p>
       </header>
 
-      <div className="flex flex-col" style={{ gap: 20 }}>
-        <SettingsCard label="Account">
-          <Row label="Email" value={me.email ?? "—"} />
-          {joinDate && <Row label="Member since" value={joinDate} />}
+      <div className="flex flex-col" style={{ gap: 24 }}>
+        <SettingsCard label="ACCOUNT">
+          {name && (
+            <p
+              className="font-serif italic text-text-primary"
+              style={{
+                fontSize: 20,
+                fontWeight: 400,
+                letterSpacing: "-0.01em",
+                marginBottom: 10,
+              }}
+            >
+              {name}
+            </p>
+          )}
+          <p
+            className="font-sans text-text-secondary"
+            style={{ fontSize: 14, lineHeight: 1.5 }}
+          >
+            {me.email ?? "—"}
+          </p>
+          {joinDate && (
+            <p
+              className="font-sans"
+              style={{
+                fontSize: 13,
+                color: "#7A90A8",
+                marginTop: 6,
+              }}
+            >
+              Member since {joinDate}
+            </p>
+          )}
+          <div
+            className="flex flex-col"
+            style={{
+              marginTop: 18,
+              gap: 8,
+              alignItems: "flex-start",
+            }}
+          >
+            <button
+              type="button"
+              onClick={onChangePassword}
+              disabled={resetState === "sending"}
+              className="font-sans"
+              style={{
+                fontSize: 13,
+                color:
+                  resetState === "sending"
+                    ? "rgba(185,28,28,0.55)"
+                    : "#B91C1C",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: resetState === "sending" ? "default" : "pointer",
+                fontWeight: 500,
+                letterSpacing: "0.01em",
+                transition: "color 150ms ease",
+              }}
+              onMouseEnter={(e) => {
+                if (resetState === "sending") return;
+                e.currentTarget.style.color = "#991B1B";
+              }}
+              onMouseLeave={(e) => {
+                if (resetState === "sending") return;
+                e.currentTarget.style.color = "#B91C1C";
+              }}
+            >
+              {resetState === "sending"
+                ? "Sending…"
+                : "Change password →"}
+            </button>
+            {resetState === "sent" && me.email && (
+              <p
+                className="font-sans"
+                style={{ fontSize: 14, color: "#7A90A8" }}
+              >
+                Reset link sent to {me.email}
+              </p>
+            )}
+            {resetState === "error" && (
+              <p
+                className="font-sans"
+                style={{ fontSize: 14, color: "#F87171" }}
+                role="alert"
+              >
+                Couldn&apos;t send the link. Try again.
+              </p>
+            )}
+          </div>
         </SettingsCard>
 
-        <SettingsCard label="Plan">
-          <div className="flex items-start justify-between" style={{ gap: 16 }}>
+        <SettingsCard label="PLAN">
+          <div
+            className="flex items-start justify-between"
+            style={{ gap: 16 }}
+          >
             <div className="min-w-0">
               <p
                 className="font-serif text-text-primary"
                 style={{
-                  fontSize: 18,
+                  fontSize: 24,
                   fontWeight: 500,
                   letterSpacing: "-0.015em",
+                  lineHeight: 1.2,
                 }}
               >
                 {isPro ? "Reid Pro" : "Free"}
@@ -155,9 +280,9 @@ export default function SettingsPage() {
               <p
                 className="font-sans"
                 style={{
-                  fontSize: 13,
+                  fontSize: 14,
                   color: "#7A90A8",
-                  marginTop: 4,
+                  marginTop: 6,
                   lineHeight: 1.5,
                 }}
               >
@@ -165,31 +290,44 @@ export default function SettingsPage() {
                   ? "Unlimited sessions."
                   : `${usedSessions} of ${FREE_SESSIONS} sessions used.`}
               </p>
+              {isPro && renewDate && (
+                <p
+                  className="font-sans"
+                  style={{
+                    fontSize: 13,
+                    color: "#7A90A8",
+                    marginTop: 4,
+                  }}
+                >
+                  Renews {renewDate}.
+                </p>
+              )}
             </div>
             {isPro ? (
               <button
                 type="button"
                 onClick={onManageBilling}
                 disabled={portalPending}
-                className="font-sans cta-shadow shrink-0"
+                className="font-sans shrink-0"
                 style={{
                   fontSize: 13,
-                  color: "#F2EDE3",
+                  fontWeight: 500,
+                  letterSpacing: "0.01em",
+                  color: "#B91C1C",
                   background: "transparent",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  borderRadius: 8,
-                  padding: "9px 16px",
+                  border: "none",
+                  padding: "4px 0",
                   cursor: portalPending ? "default" : "pointer",
                   opacity: portalPending ? 0.6 : 1,
-                  transition: "border-color 150ms ease, background 150ms ease",
+                  transition: "color 150ms ease",
                 }}
                 onMouseEnter={(e) => {
                   if (portalPending) return;
-                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.22)";
+                  e.currentTarget.style.color = "#991B1B";
                 }}
                 onMouseLeave={(e) => {
                   if (portalPending) return;
-                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.14)";
+                  e.currentTarget.style.color = "#B91C1C";
                 }}
               >
                 {portalPending ? "Opening…" : "Manage billing →"}
@@ -200,19 +338,20 @@ export default function SettingsPage() {
                 onClick={openPaywall}
                 className="font-sans cta-shadow shrink-0"
                 style={{
-                  fontSize: 13,
+                  height: 48,
+                  fontSize: 14,
                   fontWeight: 500,
-                  letterSpacing: "0.02em",
+                  letterSpacing: "0.04em",
                   color: "#F2EDE3",
                   background: "#B91C1C",
                   border: "none",
-                  borderRadius: 8,
-                  padding: "10px 18px",
+                  borderRadius: 10,
+                  padding: "0 22px",
                   cursor: "pointer",
                   transition: "background 150ms ease, transform 150ms ease",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#991818";
+                  e.currentTarget.style.background = "#991B1B";
                   e.currentTarget.style.transform = "translateY(-1px)";
                 }}
                 onMouseLeave={(e) => {
@@ -220,7 +359,7 @@ export default function SettingsPage() {
                   e.currentTarget.style.transform = "translateY(0)";
                 }}
               >
-                Upgrade to Pro
+                Upgrade to Pro →
               </button>
             )}
           </div>
@@ -228,7 +367,7 @@ export default function SettingsPage() {
             <p
               className="font-sans"
               style={{
-                fontSize: 12,
+                fontSize: 13,
                 color: "#F87171",
                 marginTop: 14,
               }}
@@ -239,7 +378,15 @@ export default function SettingsPage() {
           )}
         </SettingsCard>
 
-        <div className="flex justify-center" style={{ marginTop: 16 }}>
+        <div
+          style={{
+            marginTop: 48,
+            paddingTop: 24,
+            borderTop: "1px solid rgba(242,237,227,0.06)",
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
           <button
             type="button"
             onClick={onSignOut}
@@ -247,7 +394,7 @@ export default function SettingsPage() {
             className="font-sans"
             style={{
               fontSize: 13,
-              color: "rgba(242,237,227,0.45)",
+              color: "#7A90A8",
               background: "transparent",
               border: "none",
               padding: "10px 14px",
@@ -261,75 +408,13 @@ export default function SettingsPage() {
             }}
             onMouseLeave={(e) => {
               if (signingOut) return;
-              e.currentTarget.style.color = "rgba(242,237,227,0.45)";
+              e.currentTarget.style.color = "#7A90A8";
             }}
           >
             {signingOut ? "Signing out…" : "Sign out"}
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function SettingsCard({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      style={{
-        background: "#0F1E35",
-        border: "1px solid rgba(255,255,255,0.07)",
-        borderRadius: 12,
-        padding: "20px 22px",
-        boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
-      }}
-    >
-      <p
-        className="font-sans"
-        style={{
-          fontSize: 11,
-          fontWeight: 500,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: "rgba(242,237,227,0.45)",
-          marginBottom: 14,
-        }}
-      >
-        {label}
-      </p>
-      {children}
-    </section>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      className="flex items-baseline justify-between"
-      style={{
-        gap: 16,
-        paddingTop: 10,
-        paddingBottom: 10,
-        borderTop: "1px solid rgba(255,255,255,0.04)",
-      }}
-    >
-      <span
-        className="font-sans"
-        style={{ fontSize: 13, color: "#7A90A8" }}
-      >
-        {label}
-      </span>
-      <span
-        className="font-sans text-text-primary truncate"
-        style={{ fontSize: 14, maxWidth: "65%" }}
-      >
-        {value}
-      </span>
-    </div>
+    </motion.div>
   );
 }

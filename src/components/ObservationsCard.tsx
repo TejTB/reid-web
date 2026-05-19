@@ -90,7 +90,7 @@ export default function ObservationsCard({ userId }: { userId: string }) {
             glowColor="red"
             className="w-full"
           >
-            <div className="px-4 py-3 bg-[#111111] rounded-xl">
+            <div className="px-4 py-3 rounded-xl">
               <div className="flex items-center justify-between mb-2">
                 <CategoryBadge category={o.category ?? "avoidance"} />
                 <span className="text-white/20 text-xs font-sans">

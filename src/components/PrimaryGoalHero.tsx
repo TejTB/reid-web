@@ -32,10 +32,12 @@ export default function PrimaryGoalHero({
 
   return (
     <section
-      className={`home-card ${flash ? "animate-goal-flash" : ""}`.trim()}
+      className={flash ? "animate-goal-flash" : ""}
       style={{
+        padding: "24px",
+        borderRadius: 14,
         boxShadow: nearComplete
-          ? "inset 4px 0 0 var(--color-accent), 0 8px 32px rgba(0,0,0,0.2)"
+          ? "inset 4px 0 0 var(--color-accent)"
           : undefined,
       }}
     >
@@ -139,7 +141,7 @@ export default function PrimaryGoalHero({
                 lineHeight: 1.4,
               }}
             >
-              Goal reached.
+              Done.
             </p>
           ) : (
             <p

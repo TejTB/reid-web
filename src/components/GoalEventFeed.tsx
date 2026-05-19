@@ -7,8 +7,8 @@ import { formatEventTime, formatGoalValue } from "@/lib/format";
  *  timestamp, a green/red delta badge with the goal name, and the optional
  *  note in Reid's voice (Playfair italic).
  *
- *  The topmost row is animated on each render via the existing fade-up
- *  keyframe — React re-mounts it by event id so a fresh insert flashes in. */
+ *  Wrapped externally in <GlowCard> by /goals — this component renders only
+ *  the inner column. */
 export default function GoalEventFeed({
   events,
 }: {
@@ -18,22 +18,21 @@ export default function GoalEventFeed({
     <aside
       className="lg:sticky lg:top-6 flex flex-col"
       style={{
-        background: "rgba(255,255,255,0.03)",
-        border: "1px solid rgba(255,255,255,0.07)",
+        padding: "24px",
         borderRadius: 14,
-        padding: "20px 20px 16px",
-        // Right rail caps near a sensible scroll height on tall viewports.
         maxHeight: "calc(100vh - 96px)",
         overflow: "hidden",
       }}
     >
       <header
-        className="font-sans text-text-dim mb-4 shrink-0"
+        className="font-sans shrink-0"
         style={{
           fontSize: 11,
-          fontWeight: 600,
-          letterSpacing: "0.16em",
+          fontWeight: 500,
+          letterSpacing: "0.1em",
           textTransform: "uppercase",
+          color: "#7A90A8",
+          marginBottom: 18,
         }}
       >
         Live activity
@@ -41,14 +40,15 @@ export default function GoalEventFeed({
 
       {events.length === 0 ? (
         <p
-          className="font-serif italic text-text-dim [text-wrap:pretty]"
+          className="font-serif italic [text-wrap:pretty]"
           style={{
-            fontSize: 14,
+            fontSize: 15,
+            color: "#7A90A8",
             lineHeight: 1.55,
-            padding: "16px 4px",
+            padding: "8px 0",
           }}
         >
-          Updates will appear here as you tell Reid about your progress.
+          Tell me what moved. I&apos;ll log it.
         </p>
       ) : (
         <ul
@@ -73,9 +73,6 @@ export default function GoalEventFeed({
 function FeedRow({ event }: { event: GoalEventWithGoal }) {
   const positive = event.delta >= 0;
   const sign = positive ? "+" : "-";
-  // Build the magnitude using the goal's unit metadata so the sign sits in
-  // front of the unit (e.g. "+£500", "-2 clients") instead of in front of
-  // the raw number.
   const magnitude = formatGoalValue(
     { unit: event.goal_unit, unit_prefix: event.goal_unit_prefix },
     Math.abs(event.delta),
