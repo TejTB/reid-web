@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ComponentType, SVGProps } from "react";
 import { useState } from "react";
+import { motion } from "framer-motion";
 
 type IconComponent = ComponentType<
   SVGProps<SVGSVGElement> & { size?: number | string }
@@ -25,7 +26,7 @@ export default function NavItem({
 
   if (variant === "sidebar") {
     const background = active
-      ? "rgba(255,255,255,0.06)"
+      ? "rgba(185,28,28,0.06)"
       : hovered
       ? "rgba(255,255,255,0.03)"
       : "transparent";
@@ -38,29 +39,35 @@ export default function NavItem({
         onMouseLeave={() => setHovered(false)}
         className="relative flex items-center"
         style={{
-          // 2px left border on both active and inactive keeps text alignment
-          // stable when active state toggles (borderLeft sits inside the box).
-          paddingTop: 10,
-          paddingBottom: 10,
+          height: 40,
           paddingRight: 14,
-          paddingLeft: 12,
+          paddingLeft: 16,
           borderRadius: 8,
           background,
           color,
           fontFamily: "var(--font-sans), sans-serif",
           fontSize: 14,
           fontWeight: 400,
-          transition: "all 150ms ease",
-          borderLeft: active
-            ? "2px solid #B91C1C"
-            : "2px solid transparent",
+          transition: "background-color 150ms ease, color 150ms ease",
         }}
       >
-        <Icon
-          size={15}
-          strokeWidth={1.7}
-          style={{ marginRight: 10 }}
-        />
+        {active && (
+          <motion.span
+            layoutId="reid-nav-indicator"
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 6,
+              bottom: 6,
+              width: 2,
+              borderRadius: 1,
+              background: "#B91C1C",
+            }}
+            transition={{ type: "spring", stiffness: 380, damping: 32 }}
+          />
+        )}
+        <Icon size={15} strokeWidth={1.7} style={{ marginRight: 8 }} />
         <span>{label}</span>
       </Link>
     );

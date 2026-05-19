@@ -22,6 +22,10 @@ export interface User {
   subscription_period_end: string | null;
   last_reengage_email_at: string | null;
   onboarding_task_completed_at: string | null;
+  avatar_url: string | null;
+  push_message: string | null;
+  push_message_date: string | null;
+  last_session_date: string | null;
 }
 
 export interface Conversation {

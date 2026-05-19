@@ -1,0 +1,35 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e6]
+        - generic [ref=e10]: Reid
+        - button "Open settings" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+      - navigation [ref=e15]:
+        - link "Home" [ref=e16] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e18]
+          - generic [ref=e21]: Home
+        - link "Goals" [ref=e22] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e23]
+          - generic [ref=e27]: Goals
+        - link "Reid" [ref=e28] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e29]
+          - generic [ref=e31]: Reid
+        - link "Noticed" [ref=e32] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e33]
+          - generic [ref=e36]: Noticed
+        - link "Plan" [ref=e37] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e38]
+          - generic [ref=e40]: Plan
+        - link "Tasks" [ref=e41] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e42]
+          - generic [ref=e45]: Tasks
+    - main [ref=e46]
+  - alert [ref=e52]

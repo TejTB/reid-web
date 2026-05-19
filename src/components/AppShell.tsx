@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Eye,
@@ -15,7 +15,10 @@ import NavItem from "./NavItem";
 import SettingsModal from "./SettingsModal";
 import PaywallModal from "./PaywallModal";
 import { UserDropdown } from "./UserDropdown";
-import { useMe } from "./AuthProvider";
+import { useMe, useAuth } from "./AuthProvider";
+import { LocationTag } from "./ui/location-tag";
+import { FREE_SESSIONS } from "@/lib/session-shared";
+import { supabase } from "@/lib/supabase";
 
 const NAV = [
   { href: "/home", label: "Home", icon: Home },
@@ -30,12 +33,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const me = useMe();
+  const { refresh } = useAuth();
   const [settingsHovered, setSettingsHovered] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // The gear button now routes to the full /settings page. We keep the
-  // SettingsModal mounted below because other surfaces (e.g. PaywallModal
-  // recovery flows) still dispatch `reid:open-settings`; that path is
-  // unaffected by this change.
   function openSettings() {
     router.push("/settings");
   }
@@ -58,9 +59,51 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }),
     );
   }
+  function triggerAvatarUpload() {
+    fileInputRef.current?.click();
+  }
+  async function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      const res = await fetch("/api/avatar/upload", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+      if (res.ok) {
+        await refresh();
+      } else {
+        console.error("[avatar upload] failed:", res.status);
+      }
+    } catch (err) {
+      console.error("[avatar upload] error:", err);
+    }
+  }
+
+  const streak = me?.streak_days ?? 0;
+  const sessionCount = me?.session_count ?? 0;
+  const sessionLabel = isPro
+    ? `Session ${sessionCount}`
+    : `Session ${Math.min(sessionCount + 1, FREE_SESSIONS)} of ${FREE_SESSIONS}`;
+  const streakLabel = streak > 0 ? `🔥 ${streak} day streak` : "Start your streak";
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-dark">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        onChange={handleAvatarFile}
+        style={{ display: "none" }}
+        aria-hidden="true"
+      />
+
       <aside
         className="hidden md:flex fixed inset-y-0 left-0 w-[224px] flex-col z-40"
         style={{
@@ -73,7 +116,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div
           className="flex items-center gap-3"
           style={{
-            padding: "28px 22px 22px",
+            padding: "24px 22px 20px",
             borderBottom: "1px solid rgba(242,237,232,0.06)",
           }}
         >
@@ -118,10 +161,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        {/* Account dropdown: replaces the static identity chip. Surfaces user
-            identity + Settings (existing SettingsModal), Upgrade to Pro
-            (or "Reid Pro" badge for Pro users), and Log out. Triggers the
-            same global events the rest of the app already dispatches. */}
+        {/* Stats strip — JARVIS status panel for the founder's pace. */}
+        {name && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "12px 16px",
+              borderTop: "1px solid rgba(242,237,232,0.06)",
+              fontFamily: "var(--font-sans), sans-serif",
+              fontSize: 11,
+              color: "#7A90A8",
+              letterSpacing: "0.02em",
+            }}
+          >
+            <span>{streakLabel}</span>
+            <span>{sessionLabel}</span>
+          </div>
+        )}
+
         {name && (
           <div
             style={{
@@ -135,18 +194,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 email: me?.email ?? null,
                 initials: initial,
                 is_pro: isPro,
+                avatarUrl: me?.avatar_url ?? null,
               }}
               onOpenSettings={openSettingsModal}
               onUpgrade={openPaywall}
+              onUploadAvatar={triggerAvatarUpload}
             />
+            <div style={{ marginTop: 8, padding: "0 4px" }}>
+              <LocationTag />
+            </div>
           </div>
         )}
       </aside>
 
       <main className="reid-radial flex-1 md:ml-[224px] pb-20 md:pb-0">
-        {/* Keying by pathname forces React to remount this wrapper on each
-            navigation, so the page-enter animation actually fires (otherwise
-            the App Router preserves the wrapper and only swaps `children`). */}
         <div key={pathname} className="page-enter">
           {children}
         </div>
@@ -167,12 +228,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </nav>
 
-      {/* Globally mounted — listens for the `reid:open-settings` event the
-          sidebar gear dispatches, regardless of which (app) route is active. */}
       <SettingsModal />
-      {/* Globally mounted — opens on the `reid:open-paywall` event the chat
-          page fires when /api/reid returns 429 daily_limit_exceeded, and on
-          Settings → Upgrade to Pro. */}
       <PaywallModal />
     </div>
   );

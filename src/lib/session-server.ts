@@ -121,12 +121,67 @@ export async function endSession(
         session_count: (u?.session_count ?? 0) + 1,
       })
       .eq("id", userId);
+    await updateStreak(db, userId, new Date());
   } else {
     await db
       .from("users")
       .update({ last_session_at: new Date().toISOString() })
       .eq("id", userId);
   }
+}
+
+// ----- streak --------------------------------------------------------------
+
+/** Returns a YYYY-MM-DD string for the given Date in Europe/London (BST/GMT-
+ *  aware via the runtime ICU). The product is UK-anchored, so streak
+ *  boundaries follow the user's wall-clock day, not UTC or server-local. */
+function ukDay(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === "year")!.value;
+  const m = parts.find((p) => p.type === "month")!.value;
+  const day = parts.find((p) => p.type === "day")!.value;
+  return `${y}-${m}-${day}`;
+}
+
+/** Increments users.streak_days when a session completes on a new UK day.
+ *  No-op if a session has already counted today. Resets to 1 if the previous
+ *  session was older than yesterday or never. The .neq() predicate guards
+ *  against double-increment from near-simultaneous SESSION_COMPLETE events. */
+export async function updateStreak(
+  db: SupabaseClient,
+  userId: string,
+  completedAt: Date,
+): Promise<void> {
+  const today = ukDay(completedAt);
+  // Anchor the "yesterday" math at noon UK so DST hour shifts (29 Mar 2026)
+  // can't slip the date by a day.
+  const yesterday = ukDay(
+    new Date(Date.parse(`${today}T12:00:00Z`) - 24 * 60 * 60 * 1000),
+  );
+
+  const { data: user } = await db
+    .from("users")
+    .select("streak_days, last_session_date")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const last = (user?.last_session_date as string | null) ?? null;
+  const prev = (user?.streak_days as number | null) ?? 0;
+
+  if (last === today) return;
+
+  const next = last === yesterday ? prev + 1 : 1;
+
+  await db
+    .from("users")
+    .update({ streak_days: next, last_session_date: today })
+    .eq("id", userId)
+    .neq("last_session_date", today);
 }
 
 /** Drops the cached `generated_take` text on every observation, goal, and

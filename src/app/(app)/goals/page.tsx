@@ -10,24 +10,15 @@ import { supabase } from "@/lib/supabase";
 import type { Goal } from "@/types/db";
 import LogoMark from "@/components/LogoMark";
 import { GlowCard } from "@/components/ui/glow-card";
+import { GoalRing } from "@/components/ui/goal-ring";
 import {
   FullScreenCard,
   type FullScreenGoalData,
 } from "@/components/ui/full-screen-card";
 
 const MONTHS_SHORT = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
 function formatDeadline(iso: string | null): string {
@@ -135,8 +126,6 @@ export default function GoalsPage() {
     };
   }, [userId]);
 
-  // Lazily load goal_events history for the active goal — used by the
-  // FullScreenCard's LineChart when there are >=3 data points.
   const loadHistory = useCallback(
     async (goalId: string, baseValue: number) => {
       const { data } = await supabase
@@ -145,17 +134,11 @@ export default function GoalsPage() {
         .eq("goal_id", goalId)
         .order("created_at", { ascending: true });
       const rows = (data ?? []) as { delta: number; created_at: string }[];
-      // Convert deltas to a cumulative running value; the chart wants the
-      // total at each point, not the increment. Anchor at zero so the line
-      // starts where the founder started.
       let running = 0;
       const points = rows.map((e) => {
         running += e.delta;
         return { value: running, created_at: e.created_at };
       });
-      // If running !== baseValue, the goal had a different starting position
-      // or unrecorded movement — append a final synthetic "now" point so the
-      // chart always ends on the current_value the user sees on the card.
       if (points.length === 0 || points[points.length - 1].value !== baseValue) {
         points.push({ value: baseValue, created_at: new Date().toISOString() });
       }
@@ -200,6 +183,8 @@ export default function GoalsPage() {
   }, [activeId, goals, activeHistory]);
 
   const activeGoals = goals.filter((g) => !g.completed_at);
+  const primaryGoal = activeGoals.find((g) => g.is_primary) ?? null;
+  const secondaryGoals = activeGoals.filter((g) => !g.is_primary);
   const completedGoals = goals.filter((g) => g.completed_at);
   const allEmpty = activeGoals.length === 0 && completedGoals.length === 0;
 
@@ -260,32 +245,103 @@ export default function GoalsPage() {
         ) : allEmpty ? (
           <GoalsEmptyState />
         ) : (
-          <motion.div
-            initial="hidden"
-            animate="visible"
-            variants={{
-              hidden: {},
-              visible: { transition: { staggerChildren: 0.06 } },
-            }}
-            className="grid grid-cols-1 md:grid-cols-2"
-            style={{ gap: 16 }}
-          >
-            {activeGoals.map((g) => (
+          <div className="flex flex-col" style={{ gap: 32 }}>
+            {primaryGoal && (
               <motion.div
-                key={g.id}
-                layoutId={`goal-${g.id}`}
-                variants={{
-                  hidden: { opacity: 0, y: 16 },
-                  visible: { opacity: 1, y: 0 },
-                }}
-                transition={{ duration: 0.35 }}
-                onClick={() => openGoal(g)}
+                layoutId={`goal-${primaryGoal.id}`}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45 }}
+                onClick={() => openGoal(primaryGoal)}
                 style={{ cursor: "pointer" }}
               >
-                <GoalTile goal={g} />
+                <GlowCard customSize glowColor="red" className="w-full">
+                  <div
+                    className="flex flex-col items-center"
+                    style={{ padding: 40, gap: 16 }}
+                  >
+                    <GoalRing
+                      currentValue={Number(primaryGoal.current_value ?? 0)}
+                      targetValue={Number(primaryGoal.target_value ?? 0)}
+                      unit={primaryGoal.unit ?? ""}
+                      unitPrefix={primaryGoal.unit_prefix ?? true}
+                      label={primaryGoal.title ?? ""}
+                      deadline={primaryGoal.deadline}
+                      size="lg"
+                    />
+                    <p
+                      className="font-sans"
+                      style={{
+                        fontSize: 12,
+                        color: "#7A90A8",
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        marginTop: 8,
+                      }}
+                    >
+                      {Math.round(progressPct(primaryGoal))}% complete
+                    </p>
+                  </div>
+                </GlowCard>
               </motion.div>
-            ))}
-          </motion.div>
+            )}
+
+            {secondaryGoals.length > 0 && (
+              <>
+                {primaryGoal && (
+                  <div
+                    className="flex items-center"
+                    style={{ gap: 16 }}
+                  >
+                    <span
+                      className="font-sans"
+                      style={{
+                        fontSize: 11,
+                        color: "#7A90A8",
+                        letterSpacing: "0.12em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Other goals
+                    </span>
+                    <div
+                      style={{
+                        flex: 1,
+                        height: 1,
+                        background: "rgba(255,255,255,0.06)",
+                      }}
+                    />
+                  </div>
+                )}
+                <motion.div
+                  initial="hidden"
+                  animate="visible"
+                  variants={{
+                    hidden: {},
+                    visible: { transition: { staggerChildren: 0.06 } },
+                  }}
+                  className="grid grid-cols-1 md:grid-cols-2"
+                  style={{ gap: 16 }}
+                >
+                  {secondaryGoals.map((g) => (
+                    <motion.div
+                      key={g.id}
+                      layoutId={`goal-${g.id}`}
+                      variants={{
+                        hidden: { opacity: 0, y: 16 },
+                        visible: { opacity: 1, y: 0 },
+                      }}
+                      transition={{ duration: 0.35 }}
+                      onClick={() => openGoal(g)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <GoalTile goal={g} />
+                    </motion.div>
+                  ))}
+                </motion.div>
+              </>
+            )}
+          </div>
         )}
       </motion.div>
 
@@ -323,8 +379,10 @@ function GoalTile({ goal }: { goal: Goal }) {
         }}
       >
         <h3
-          className="font-serif italic [text-wrap:pretty]"
+          className="[text-wrap:pretty]"
           style={{
+            fontFamily: "'Playfair Display', serif",
+            fontStyle: "italic",
             fontSize: 22,
             color: "#F2EDE3",
             lineHeight: 1.25,
@@ -361,7 +419,7 @@ function GoalTile({ goal }: { goal: Goal }) {
         </div>
         <div
           style={{
-            height: 4,
+            height: 6,
             width: "100%",
             background: "rgba(255,255,255,0.06)",
             borderRadius: 999,

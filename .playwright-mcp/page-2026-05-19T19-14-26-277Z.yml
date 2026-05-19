@@ -1,0 +1,59 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e6]
+        - generic [ref=e10]: Reid
+        - button "Open settings" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+      - navigation [ref=e15]:
+        - link "Home" [ref=e16] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e17]
+          - generic [ref=e20]: Home
+        - link "Goals" [active] [ref=e21] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e22]
+          - generic [ref=e26]: Goals
+        - link "Reid" [ref=e27] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e28]
+          - generic [ref=e30]: Reid
+        - link "Noticed" [ref=e31] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e32]
+          - generic [ref=e35]: Noticed
+        - link "Plan" [ref=e36] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e37]
+          - generic [ref=e39]: Plan
+        - link "Tasks" [ref=e40] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e42]
+          - generic [ref=e45]: Tasks
+      - generic [ref=e57]:
+        - generic [ref=e58]: Start your streak
+        - generic [ref=e59]: Session 1 of 3
+      - generic [ref=e60]:
+        - button "Open account menu" [ref=e61]:
+          - generic [ref=e63]: S
+          - generic [ref=e64]: Smoke
+        - button "Newcastle, UK 20:14 GMT" [ref=e80]:
+          - generic [ref=e71]:
+            - generic [ref=e72]: Newcastle, UK
+            - generic [ref=e73]: 20:14 GMT
+    - main [ref=e46]:
+      - generic [ref=e108]:
+        - generic [ref=e109]:
+          - heading "Your Goals" [level=1] [ref=e110]
+          - paragraph [ref=e111]: What you said you wanted. Reid's holding you to it.
+        - generic [ref=e112]:
+          - img [ref=e114]
+          - generic [ref=e118]:
+            - heading "No goals yet." [level=2] [ref=e119]
+            - paragraph [ref=e120]: They'll appear after our first real session.
+          - link "Open session" [ref=e121] [cursor=pointer]:
+            - /url: /chat
+            - generic [ref=e122]: Open session
+            - img [ref=e123]
+  - alert [ref=e56]

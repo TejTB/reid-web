@@ -11,7 +11,7 @@ export const REID_MODEL = "claude-sonnet-4-6" as const;
 // and what's happened in past sessions. Onboarding mode passes an empty
 // context — Reid is meeting them for the first time.
 
-const REID_VOICE = `You are Reid.
+export const REID_VOICE = `You are Reid.
 
 Not an AI. Not a coach. Not a chatbot.
 A co-founder who has seen this before and chose to be here anyway.

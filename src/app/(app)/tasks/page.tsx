@@ -366,6 +366,26 @@ export default function TasksPage() {
   );
 }
 
+type UrgencyTone = "overdue" | "today" | "future";
+
+function urgencyOf(task: UnifiedTask): UrgencyTone {
+  if (task.completed || !task.due_date) return "future";
+  const due = new Date(task.due_date);
+  if (Number.isNaN(due.getTime())) return "future";
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  if (dueDay.getTime() < today.getTime()) return "overdue";
+  if (dueDay.getTime() === today.getTime()) return "today";
+  return "future";
+}
+
+function urgencyBorder(tone: UrgencyTone): string {
+  if (tone === "overdue") return "3px solid #B91C1C";
+  if (tone === "today") return "3px solid #D97706";
+  return "3px solid rgba(255,255,255,0.06)";
+}
+
 function TaskListItem({
   task,
   onOpen,
@@ -374,6 +394,8 @@ function TaskListItem({
   onOpen: () => void;
 }) {
   const due = task.due_date ? `Due ${formatDate(task.due_date)}` : null;
+  const tone = urgencyOf(task);
+  const isOverdue = tone === "overdue";
   return (
     <motion.li
       layoutId={`task-${task.id}`}
@@ -393,25 +415,48 @@ function TaskListItem({
             display: "flex",
             flexDirection: "column",
             gap: 8,
+            borderLeft: urgencyBorder(tone),
           }}
         >
-          <p
-            className="font-sans [text-wrap:pretty]"
-            style={{
-              fontSize: 15,
-              color: "#F2EDE3",
-              lineHeight: 1.55,
-              margin: 0,
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-              textDecoration: task.completed ? "line-through" : "none",
-              textDecorationColor: "rgba(242,237,227,0.45)",
-            }}
-          >
-            {task.description}
-          </p>
+          <div className="flex items-start justify-between" style={{ gap: 12 }}>
+            <p
+              className="font-sans [text-wrap:pretty]"
+              style={{
+                fontSize: 15,
+                color: "#F2EDE3",
+                lineHeight: 1.55,
+                margin: 0,
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                textDecoration: task.completed ? "line-through" : "none",
+                textDecorationColor: "rgba(242,237,227,0.45)",
+                flex: 1,
+              }}
+            >
+              {task.description}
+            </p>
+            {isOverdue && (
+              <span
+                className="font-sans"
+                style={{
+                  flexShrink: 0,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "#F2EDE3",
+                  background: "rgba(185,28,28,0.18)",
+                  border: "1px solid rgba(185,28,28,0.35)",
+                  padding: "3px 8px",
+                  borderRadius: 999,
+                }}
+              >
+                Overdue
+              </span>
+            )}
+          </div>
           {(due || task.completed) && (
             <p
               className="font-sans"

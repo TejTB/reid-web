@@ -1,0 +1,73 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e6]
+        - generic [ref=e10]: Reid
+        - button "Open settings" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+      - navigation [ref=e15]:
+        - link "Home" [ref=e16] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e17]
+          - generic [ref=e20]: Home
+        - link "Goals" [ref=e21] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e22]
+          - generic [ref=e26]: Goals
+        - link "Reid" [ref=e27] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e28]
+          - generic [ref=e30]: Reid
+        - link "Noticed" [ref=e31] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e32]
+          - generic [ref=e35]: Noticed
+        - link "Plan" [ref=e36] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e37]
+          - generic [ref=e39]: Plan
+        - link "Tasks" [ref=e40] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e42]
+          - generic [ref=e45]: Tasks
+      - generic [ref=e57]:
+        - generic [ref=e58]: Start your streak
+        - generic [ref=e59]: Session 1 of 3
+      - generic [ref=e60]:
+        - button "Open account menu" [ref=e61]:
+          - generic [ref=e63]: S
+          - generic [ref=e64]: Smoke
+        - button "Newcastle, UK 20:14 GMT" [ref=e80]:
+          - generic [ref=e71]:
+            - generic [ref=e72]: Newcastle, UK
+            - generic [ref=e73]: 20:14 GMT
+    - main [ref=e46]:
+      - generic [ref=e48]:
+        - generic [ref=e49]:
+          - heading "Tasks" [level=1] [ref=e50]
+          - paragraph [ref=e51]: What Reid has asked you to do.
+        - list [ref=e74]:
+          - listitem:
+            - generic:
+              - generic:
+                - generic:
+                  - paragraph: Talk to three users this week.
+  - alert [ref=e56]
+  - dialog [ref=e81]:
+    - button "Close" [active] [ref=e82] [cursor=pointer]:
+      - img [ref=e83]
+    - generic [ref=e88]:
+      - generic [ref=e89]: Task
+      - heading "Talk to three users this week" [level=2] [ref=e90]
+      - paragraph [ref=e91]: Talk to three users this week.
+      - generic [ref=e92]:
+        - paragraph [ref=e93]: Why Reid assigned this
+        - paragraph [ref=e95]: Reid hasn't written the context for this one yet. It came out of a session — the why will fill in next time you talk.
+      - generic [ref=e96]:
+        - paragraph [ref=e97]: What happens if you don't
+        - paragraph [ref=e99]: Nothing dramatic. You just stay where you are. That's the cost.
+      - button "Mark complete" [ref=e101] [cursor=pointer]
+      - generic [ref=e102]:
+        - paragraph [ref=e103]: Reid's take
+        - button "Reid's take" [ref=e105] [cursor=pointer]
