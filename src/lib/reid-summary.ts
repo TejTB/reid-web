@@ -120,6 +120,25 @@ export function extractName(input: string | Array<{ role: string; content: strin
   for (const msg of messages) {
     if (!msg.content) continue;
     const text = msg.content.trim();
+
+    // Sentence-anchored intro patterns first — these handle the common
+    // "I'm Theo, building X" / "I am Theo. Founder of Y" / "This is Theo"
+    // forms that the older single regex missed because it required the name
+    // to be followed by sentence-end punctuation only.
+    const introPatterns: RegExp[] = [
+      /^I'?m\s+([A-Z][a-z]{1,20})(?=[,.!?\s]|$)/,
+      /^I am\s+([A-Z][a-z]{1,20})(?=[,.!?\s]|$)/,
+      /^This is\s+([A-Z][a-z]{1,20})(?=[,.!?\s]|$)/,
+      /^([A-Z][a-z]{1,20})\s+here(?=[,.!?\s]|$)/,
+    ];
+    for (const re of introPatterns) {
+      const m = text.match(re);
+      if (m) {
+        const raw = m[1];
+        return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+      }
+    }
+
     const phraseMatch = text.match(
       /(?:^|\s)(?:i'?m|i am|my name(?:'s| is)|it'?s|call me)\s+([A-Z][a-z]{1,20})/i,
     );

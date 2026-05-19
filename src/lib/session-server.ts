@@ -43,14 +43,20 @@ export async function getSessions(
 }
 
 /** Creates a new session row and returns its id. Throws on failure — the
- *  route handler is responsible for surfacing the error. */
+ *  route handler is responsible for surfacing the error.
+ *
+ *  `mode` distinguishes onboarding sessions from real chat sessions. Only
+ *  `chat` rows count toward the free-tier session quota; only `chat` rows
+ *  should ever bump `users.session_count`. Defaults to `chat` to match the
+ *  column default. */
 export async function createSession(
   db: SupabaseClient,
   userId: string,
+  mode: "chat" | "onboarding" = "chat",
 ): Promise<string> {
   const { data, error } = await db
     .from("sessions")
-    .insert({ user_id: userId })
+    .insert({ user_id: userId, mode })
     .select("id")
     .single();
   if (error || !data) {

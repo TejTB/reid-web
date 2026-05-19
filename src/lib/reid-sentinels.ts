@@ -1,11 +1,13 @@
 // Parser + processor for Reid's structured sentinels.
 //
-// Reid emits four kinds of sentinel inline with his response:
+// Reid emits these sentinels inline with his response:
 //
 //   [GOAL_UPDATE]          goalTitle="..." delta=NN note="..."
 //   [SESSION_COMPLETE]     summary="..." task="..."
 //   [ONBOARDING_COMPLETE]  summary="..." task="..." goals=[ { ... }, ... ]
 //   [EMAIL_CAPTURED]       email="..."
+//   [NAME_CAPTURED]        name="..."
+//   [OBSERVATION]          text="..." confidence=high|medium|low
 //
 // `parseSentinels(raw)` runs over the final assistant response, extracts all
 // matches, and returns the cleaned text alongside structured payloads.
@@ -58,6 +60,7 @@ export interface ParsedSentinels {
   sessionComplete: SessionCompleteSentinel | null;
   onboardingComplete: OnboardingCompleteSentinel | null;
   emailCaptured: string | null;
+  nameCaptured: string | null;
   observations: ObservationSentinel[];
 }
 
@@ -72,6 +75,7 @@ export const SENTINEL_PREFIXES = [
   "[SESSION_COMPLETE]",
   "[ONBOARDING_COMPLETE]",
   "[EMAIL_CAPTURED]",
+  "[NAME_CAPTURED]",
   "[OBSERVATION]",
 ] as const;
 
@@ -101,6 +105,9 @@ const ONBOARDING_COMPLETE_RE =
 // [EMAIL_CAPTURED] email="..."
 const EMAIL_CAPTURED_RE = /\[EMAIL_CAPTURED\]\s*email="([^"]+)"/;
 
+// [NAME_CAPTURED] name="..."
+const NAME_CAPTURED_RE = /\[NAME_CAPTURED\]\s*name="([^"]+)"/;
+
 // [OBSERVATION] text="..." confidence=high|medium|low -- zero or one per
 // session, may repeat in malformed sessions; we capture every well-formed
 // match and dedupe by trimmed text.
@@ -110,7 +117,7 @@ const OBSERVATION_RE =
 // Belt-and-braces: any bracketed sentinel name we didn't formally match.
 // Strips the rest of the line so a malformed tag doesn't leak.
 const STRAY_SENTINEL_RE =
-  /\[(GOAL_UPDATE|SESSION_COMPLETE|ONBOARDING_COMPLETE|EMAIL_CAPTURED|OBSERVATION)\][^\n]*/g;
+  /\[(GOAL_UPDATE|SESSION_COMPLETE|ONBOARDING_COMPLETE|EMAIL_CAPTURED|NAME_CAPTURED|OBSERVATION)\][^\n]*/g;
 
 // ----- parseSentinels ------------------------------------------------------
 
@@ -121,6 +128,7 @@ export function parseSentinels(raw: string): ParsedSentinels {
     sessionComplete: null,
     onboardingComplete: null,
     emailCaptured: null,
+    nameCaptured: null,
     observations: [],
   };
 
@@ -207,6 +215,20 @@ export function parseSentinels(raw: string): ParsedSentinels {
       result.emailCaptured = email;
     }
     working = working.replace(EMAIL_CAPTURED_RE, "");
+  }
+
+  // ----- NAME_CAPTURED
+  const nmMatch = working.match(NAME_CAPTURED_RE);
+  if (nmMatch) {
+    // First-name only; normalise capitalisation so downstream UI doesn't
+    // have to. Reject obviously-bad payloads (empty, whitespace, too long).
+    const rawName = nmMatch[1].trim();
+    const firstToken = rawName.split(/\s+/)[0] ?? "";
+    if (firstToken.length > 0 && firstToken.length <= 40) {
+      result.nameCaptured =
+        firstToken.charAt(0).toUpperCase() + firstToken.slice(1).toLowerCase();
+    }
+    working = working.replace(NAME_CAPTURED_RE, "");
   }
 
   // ----- OBSERVATION (zero or more, deduped by trimmed text)
@@ -416,6 +438,27 @@ export async function processSentinels(
         .from("users")
         .update({ email: parsed.emailCaptured })
         .eq("id", userId);
+    } catch {
+      // ignore
+    }
+  }
+
+  // --- Name captured --- only write when users.name is currently empty so
+  // we never overwrite a user-edited name with whatever Reid heard.
+  if (parsed.nameCaptured) {
+    try {
+      const { data: existing } = await db
+        .from("users")
+        .select("name")
+        .eq("id", userId)
+        .maybeSingle();
+      const current = (existing?.name as string | null | undefined) ?? null;
+      if (!current || current.trim().length === 0) {
+        await db
+          .from("users")
+          .update({ name: parsed.nameCaptured })
+          .eq("id", userId);
+      }
     } catch {
       // ignore
     }

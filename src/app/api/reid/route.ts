@@ -45,7 +45,7 @@ const SENTINEL_HARD_CAP = 4096;
 // Final-pass regexes -- mirror reid-sentinels.ts so flush() catches anything
 // the streaming filter missed (malformed or truncated sentinels).
 const FLUSH_SENTINEL_LINE_RE =
-  /\[(GOAL_UPDATE|SESSION_COMPLETE|ONBOARDING_COMPLETE|EMAIL_CAPTURED)\][^\n]*/g;
+  /\[(GOAL_UPDATE|SESSION_COMPLETE|ONBOARDING_COMPLETE|EMAIL_CAPTURED|NAME_CAPTURED|OBSERVATION)\][^\n]*/g;
 const FLUSH_ONBOARDING_BLOCK_RE =
   /\[ONBOARDING_COMPLETE\][\s\S]*?goals=\[[\s\S]*?\]/g;
 
@@ -254,6 +254,9 @@ class SentinelStripper {
       } else if (this.inSentinel === "[EMAIL_CAPTURED]") {
         re = /^\[EMAIL_CAPTURED\]\s*email="[^"]+"/;
         optionalAttrStart = null;
+      } else if (this.inSentinel === "[NAME_CAPTURED]") {
+        re = /^\[NAME_CAPTURED\]\s*name="[^"]+"/;
+        optionalAttrStart = null;
       }
       if (re) {
         const m = buf.match(re);
@@ -412,7 +415,8 @@ export async function POST(req: NextRequest) {
     const { count } = await db
       .from("sessions")
       .select("id", { head: true, count: "exact" })
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .eq("mode", "chat");
     const used = count ?? 0;
     if (used >= FREE_SESSIONS) {
       return Response.json(
@@ -451,7 +455,11 @@ export async function POST(req: NextRequest) {
   }
 
   if (!sessionId) {
-    sessionId = await createSession(db, userId);
+    sessionId = await createSession(
+      db,
+      userId,
+      mode === "onboarding" ? "onboarding" : "chat",
+    );
   }
 
   // Legacy conversations table: keep writing the user turn so existing
@@ -592,12 +600,19 @@ export async function POST(req: NextRequest) {
           // name.
           if (mode === "onboarding" && parsed.onboardingComplete) {
             const ob = parsed.onboardingComplete;
+            // Onboarding row is intentionally bare: the summary/task live on
+            // `users.onboarding_summary`/`onboarding_task` and the Plan
+            // timeline filters out sessions without a summary, so the
+            // onboarding row drops out naturally. `bumpUserCounters: false`
+            // because onboarding must never count toward `users.session_count`
+            // (the chat-session quota is tracked from `sessions.mode='chat'`
+            // rows on [SESSION_COMPLETE], not here).
             await endSession(db, resolvedSessionId, {
               userId,
-              summary: ob.summary || null,
-              taskSet: ob.task,
+              summary: null,
+              taskSet: null,
               messageCountDelta: newTurnMessages.length,
-              bumpUserCounters: true,
+              bumpUserCounters: false,
             });
 
             const extracted = extractName(messages);
