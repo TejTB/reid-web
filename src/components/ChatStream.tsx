@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import type { Message } from "@/types/chat";
 import { ShiningText } from "@/components/ui/shining-text";
 
@@ -30,23 +30,47 @@ export default function ChatStream({
    *  want two indicators on screen at once. */
   suppressThinking?: boolean;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll the bottom marker into view on every messages update AND on
-  // every streamingText delta. Including streamingText keeps the user pinned
-  // to the latest character as Reid types.
+  // Smooth-scroll the message column to the bottom on every messages /
+  // streamingText / isStreaming change. rAF-batched so a burst of streaming
+  // chunks coalesces into one scroll command instead of a queue of
+  // interrupted animations — that interruption is why the previous
+  // scrollIntoView approach felt like the scroll never caught up. Includes
+  // isStreaming so the "thinking." indicator that fires before any text
+  // also scrolls into view.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "end",
+    const container = scrollRef.current;
+    if (!container) return;
+    const frame = requestAnimationFrame(() => {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth",
+      });
     });
-  }, [messages, streamingText]);
+    return () => cancelAnimationFrame(frame);
+  }, [messages, streamingText, isStreaming]);
+
+  // First paint: pin to the bottom so Reid's opening message (or any
+  // restored session history seeded into `messages`) is visible without a
+  // manual scroll. useLayoutEffect runs before the browser paints, so the
+  // user never sees a top-anchored flash.
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: "smooth",
+    });
+  }, []);
 
   const hasContent = messages.length > 0 || (isStreaming && streamingText);
   const showEmpty = !!emptyState && !hasContent && !isStreaming;
 
   return (
     <div
+      ref={scrollRef}
       style={{
         flex: 1,
         overflowY: "auto",

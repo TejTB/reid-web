@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { anthropic, REID_MODEL, buildSystemPrompt } from "@/lib/anthropic";
 import { getAuthedUser } from "@/lib/supabase-auth";
-import { extractName } from "@/lib/reid-summary";
+import { extractName, isPlausibleFirstName } from "@/lib/reid-summary";
 import { getReidContext } from "@/lib/reid-context";
 import {
   parseSentinels,
@@ -15,6 +15,7 @@ import {
   appendMessages,
   endSession,
   createGoalsFromOnboarding,
+  clearGeneratedTakesForUser,
 } from "@/lib/session-server";
 import { reidRequestSchema } from "@/lib/validation";
 import { checkDailyMessageLimit, checkReidMinuteLimit } from "@/lib/ratelimit";
@@ -626,7 +627,7 @@ export async function POST(req: NextRequest) {
             if (ob.summary) update.onboarding_summary = ob.summary;
             if (ob.task) update.onboarding_task = ob.task;
             if (ob.goals.length > 0) update.onboarding_goals = ob.goals;
-            if (extracted) {
+            if (extracted && isPlausibleFirstName(extracted)) {
               const { data: existing } = await db
                 .from("users")
                 .select("name")
@@ -688,6 +689,10 @@ export async function POST(req: NextRequest) {
                     (cur?.message_count ?? 0) + newTurnMessages.length,
                 })
                 .eq("id", resolvedSessionId);
+              // Reid's take is regenerated on next click — the picture has
+              // grown since these were cached. Fire-and-forget; cache misses
+              // are cheap compared to a stale take.
+              await clearGeneratedTakesForUser(db, userId);
             }
           }
 

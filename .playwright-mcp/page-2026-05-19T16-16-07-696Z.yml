@@ -1,0 +1,59 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e6]
+        - generic [ref=e10]: Reid
+        - button "Open settings" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+      - navigation [ref=e15]:
+        - link "Home" [ref=e16] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e17]
+          - generic [ref=e20]: Home
+        - link "Goals" [ref=e21] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e22]
+          - generic [ref=e26]: Goals
+        - link "Reid" [ref=e27] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e28]
+          - generic [ref=e30]: Reid
+        - link "Noticed" [ref=e31] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e32]
+          - generic [ref=e35]: Noticed
+        - link "Plan" [ref=e36] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e37]
+          - generic [ref=e39]: Plan
+        - link "Tasks" [ref=e40] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e41]
+          - generic [ref=e44]: Tasks
+      - button "Open account menu" [ref=e57]:
+        - generic [ref=e59]: S
+        - generic [ref=e60]: Smoke
+    - main [ref=e45]:
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e48]:
+            - heading "Tasks" [level=1] [ref=e49]
+            - paragraph [ref=e50]: What Reid has asked you to do.
+          - list [ref=e61]:
+            - listitem:
+              - generic:
+                - generic:
+                  - paragraph: Talk to three users this week.
+        - dialog [ref=e66]:
+          - button "Close" [active] [ref=e67] [cursor=pointer]:
+            - img [ref=e68]
+          - generic [ref=e72]:
+            - generic [ref=e73]: Task
+            - heading "Talk to three users this week" [level=2] [ref=e74]
+            - paragraph [ref=e75]: Talk to three users this week.
+            - button "Mark complete" [ref=e77] [cursor=pointer]
+            - generic [ref=e78]:
+              - paragraph [ref=e79]: Reid's take
+              - button "Reid's take" [ref=e81] [cursor=pointer]
+  - alert [ref=e55]

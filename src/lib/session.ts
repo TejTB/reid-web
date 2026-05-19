@@ -57,7 +57,14 @@ export async function signInWithPassword(
         password,
       }),
     });
-    if (res.ok) return { error: null };
+    if (res.ok) {
+      // The server set HTTP-only cookies. The browser supabase client needs a
+      // nudge to read them — without this the next `getSession()` (which
+      // AuthProvider runs on mount) sees stale state and the post-auth route
+      // gate (e.g. /onboarding) bounces back to /login.
+      await primeBrowserSession();
+      return { error: null };
+    }
     if (res.status === 429) {
       const data = (await res.json().catch(() => ({}))) as {
         retryAfter?: number;
@@ -79,20 +86,50 @@ export async function signUpWithPassword(
   email: string,
   password: string,
 ): Promise<{ error: { message: string } | null }> {
-  const redirectTo =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/auth/callback`
-      : undefined;
-  const { error } = await supabase.auth.signUp({
-    email: email.trim().toLowerCase(),
-    password,
-    options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
-  });
-  if (error) {
-    console.error("[signUpWithPassword]", error.message);
+  try {
+    const res = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        password,
+      }),
+    });
+    if (res.ok) {
+      // Same browser-session priming dance as login — see signInWithPassword.
+      await primeBrowserSession();
+      return { error: null };
+    }
+    if (res.status === 429) {
+      const data = (await res.json().catch(() => ({}))) as {
+        retryAfter?: number;
+      };
+      const seconds = data.retryAfter ?? 60;
+      return {
+        error: {
+          message: `Too many tries. Wait ${seconds}s and try again.`,
+        },
+      };
+    }
+    return { error: { message: "Could not create account. Try again." } };
+  } catch {
     return { error: { message: "Could not create account. Try again." } };
   }
-  return { error: null };
+}
+
+/** Force the browser supabase client to re-read the auth cookies the server
+ *  just set. Without this the in-memory session stays stale until the next
+ *  full reload, which makes router.replace("/onboarding"|"/home") bounce
+ *  back to /login on the very first attempt. */
+async function primeBrowserSession(): Promise<void> {
+  try {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session) return;
+    await supabase.auth.getSession();
+  } catch {
+    // Best-effort — failure here means the next route load just sees the
+    // pre-auth state and falls through to its own redirect.
+  }
 }
 
 export async function requestPasswordReset(

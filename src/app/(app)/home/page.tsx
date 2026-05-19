@@ -11,7 +11,8 @@ import StreakIndicator from "@/components/StreakIndicator";
 import { useAuth } from "@/components/AuthProvider";
 import { supabase } from "@/lib/supabase";
 import { FREE_SESSIONS } from "@/lib/session";
-import type { Observation, User } from "@/types/db";
+import { isPlausibleFirstName } from "@/lib/reid-summary";
+import type { User } from "@/types/db";
 
 type LoadedUser = Pick<
   User,
@@ -78,31 +79,6 @@ const childVariants: Variants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
 };
 
-const OBSERVATION_CATEGORY_STYLES: Record<string, string> = {
-  avoidance: "bg-[#B91C1C]/15 text-[#f87171] border border-[#B91C1C]/25",
-  pattern: "bg-amber-900/20 text-amber-400 border border-amber-700/30",
-  contradiction: "bg-purple-900/20 text-purple-400 border border-purple-700/30",
-  strength: "bg-green-900/20 text-green-400 border border-green-700/30",
-};
-
-function ObservationBadge({ category }: { category: string }) {
-  return (
-    <span
-      className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-sans ${
-        OBSERVATION_CATEGORY_STYLES[category] ?? OBSERVATION_CATEGORY_STYLES.avoidance
-      }`}
-    >
-      {category}
-    </span>
-  );
-}
-
-function formatShortDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
-
 interface TaskRow {
   id: string;
   text: string;
@@ -113,8 +89,6 @@ export default function HomePage() {
   const router = useRouter();
   const { me, session, loading } = useAuth();
   const [taskOverride, setTaskOverride] = useState<TaskRow | null>(null);
-  const [observations, setObservations] = useState<Observation[]>([]);
-  const [observationsLoaded, setObservationsLoaded] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -122,12 +96,15 @@ export default function HomePage() {
       router.replace("/login");
       return;
     }
-    if (me && !me.onboarding_complete) {
+    // Explicit `=== false` so a stale `null`/`undefined` me (e.g. mid-fetch
+    // after AuthProvider.refresh) never falsely bounces a complete user back
+    // to onboarding.
+    if (me && me.onboarding_complete === false) {
       router.replace("/onboarding");
     }
   }, [loading, me, session, router]);
 
-  const user: LoadedUser | null = me && me.onboarding_complete ? me : null;
+  const user: LoadedUser | null = me && me.onboarding_complete === true ? me : null;
 
   const baseTasks: TaskRow[] = useMemo(() => {
     if (!user) return [];
@@ -148,24 +125,6 @@ export default function HomePage() {
       t.id === taskOverride.id ? taskOverride : t,
     );
   }, [baseTasks, taskOverride]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    let cancelled = false;
-    void (async () => {
-      const { data } = await supabase
-        .from("observations")
-        .select("id, user_id, session_id, text, confidence, category, created_at")
-        .order("created_at", { ascending: false })
-        .limit(3);
-      if (cancelled) return;
-      setObservations((data ?? []) as Observation[]);
-      setObservationsLoaded(true);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
 
   const days = useMemo(
     () => daysSince(user?.last_session_at ?? null),
@@ -250,7 +209,11 @@ export default function HomePage() {
   }
 
   const summary = user.onboarding_summary?.trim() ?? "";
-  const greetName = user.name?.trim() || "there";
+  // Defensive validate — even if the DB somehow holds a non-name string
+  // (legacy row, hand-edited value, future extractor regression), degrade
+  // to a no-name greeting rather than render "Good afternoon, Building."
+  const trimmedName = user.name?.trim() ?? "";
+  const greetName = isPlausibleFirstName(trimmedName) ? trimmedName : "";
   const sessionCount = user.session_count ?? 0;
   const isPro = user.subscription_status === "pro";
   const milestone = milestoneLabel(sessionCount, isPro);
@@ -282,7 +245,7 @@ export default function HomePage() {
             lineHeight: 1.1,
           }}
         >
-          {timeGreeting()}, {greetName}.
+          {timeGreeting()}{greetName ? `, ${greetName}` : ""}.
         </h1>
         <p
           className="font-sans text-text-dim"
@@ -403,55 +366,6 @@ export default function HomePage() {
               )}
             </GlassCard>
           </GlowCard>
-        </motion.div>
-
-        <motion.div variants={childVariants}>
-          <div
-            className="flex items-center justify-between mb-3"
-            style={{ flexWrap: "nowrap" }}
-          >
-            <span className="text-xs text-white/30 uppercase tracking-widest font-sans whitespace-nowrap">
-              What Reid Noticed
-            </span>
-            <Link
-              href="/observations"
-              className="text-xs text-white/25 hover:text-white/50 transition-colors font-sans whitespace-nowrap"
-            >
-              See all →
-            </Link>
-          </div>
-          {!observationsLoaded ? (
-            <div className="h-20 rounded-2xl bg-bg-card animate-skeleton" />
-          ) : observations.length === 0 ? (
-            <GlowCard customSize glowColor="red" className="w-full">
-              <div style={{ padding: 24 }}>
-                <p
-                  className="font-serif italic text-text-primary [text-wrap:pretty]"
-                  style={{ fontSize: 18, lineHeight: 1.5 }}
-                >
-                  Nothing yet. Give me a session and I&apos;ll start building a picture.
-                </p>
-              </div>
-            </GlowCard>
-          ) : (
-            <div className="flex flex-col" style={{ gap: 8 }}>
-              {observations.slice(0, 3).map((o) => (
-                <GlowCard key={o.id} customSize glowColor="red" className="w-full">
-                  <div className="px-4 py-3 bg-[#111111] rounded-xl">
-                    <div className="flex items-center justify-between mb-2">
-                      <ObservationBadge category={o.category ?? "avoidance"} />
-                      <span className="text-white/20 text-xs font-sans">
-                        {formatShortDate(o.created_at)}
-                      </span>
-                    </div>
-                    <p className="text-white/65 text-sm font-serif italic leading-relaxed line-clamp-2 [text-wrap:pretty]">
-                      {o.text}
-                    </p>
-                  </div>
-                </GlowCard>
-              ))}
-            </div>
-          )}
         </motion.div>
 
         <motion.div variants={childVariants}>

@@ -112,6 +112,45 @@ export function summaryForHome(close: OnboardingClose): string | null {
   return close.body.trim() || null;
 }
 
+// Known false positives the old firstWord fallback used to surface as names.
+// Includes the common opener-verb traps ("Building", "Trying", "Making") plus
+// startup-context nouns and discourse markers that would never be a real
+// first name. Lowercased so the check is case-insensitive.
+const NAME_STOPLIST = new Set([
+  // discourse markers / greetings
+  "the", "my", "hi", "hey", "so", "ok", "okay", "yeah", "yes", "no", "well",
+  "actually", "honestly", "basically", "literally", "currently", "right",
+  // common opener verbs (the "Building a SaaS" trap)
+  "building", "trying", "making", "working", "doing", "thinking", "looking",
+  "planning", "starting", "running", "writing", "creating", "developing",
+  "selling", "growing", "scaling", "launching", "shipping", "designing",
+  "researching", "validating", "testing", "exploring", "considering",
+  // pitch nouns
+  "founder", "founding", "ceo", "team", "company", "startup", "product",
+  "business", "service", "platform", "app", "tool", "idea", "project",
+  // grammar fillers
+  "an", "a",
+]);
+
+/** Returns true when `name` looks like a real first name: 1-20 chars,
+ *  alpha-only (with apostrophes/hyphens permitted for "O'Brien" / "Mary-Jane"),
+ *  no whitespace, and not on the stoplist of common opener-verb / pitch-noun
+ *  false positives. Used at every write site (extractor, sentinel processor,
+ *  defensive render) so a bad value can't sneak through. */
+export function isPlausibleFirstName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const trimmed = name.trim();
+  if (trimmed.length === 0 || trimmed.length > 20) return false;
+  if (/\s/.test(trimmed)) return false;
+  if (!/^[A-Za-zÀ-ÿ'-]+$/.test(trimmed)) return false;
+  if (NAME_STOPLIST.has(trimmed.toLowerCase())) return false;
+  return true;
+}
+
+function normaliseFirstName(raw: string): string {
+  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+}
+
 export function extractName(input: string | Array<{ role: string; content: string }>): string | null {
   const messages = typeof input === "string"
     ? [{ role: "user" as const, content: input }]
@@ -121,10 +160,9 @@ export function extractName(input: string | Array<{ role: string; content: strin
     if (!msg.content) continue;
     const text = msg.content.trim();
 
-    // Sentence-anchored intro patterns first — these handle the common
-    // "I'm Theo, building X" / "I am Theo. Founder of Y" / "This is Theo"
-    // forms that the older single regex missed because it required the name
-    // to be followed by sentence-end punctuation only.
+    // Sentence-anchored intro patterns. These require an explicit "I'm" /
+    // "I am" / "This is" / "<Name> here" anchor so we never grab whatever
+    // capitalised word happens to lead a sentence.
     const introPatterns: RegExp[] = [
       /^I'?m\s+([A-Z][a-z]{1,20})(?=[,.!?\s]|$)/,
       /^I am\s+([A-Z][a-z]{1,20})(?=[,.!?\s]|$)/,
@@ -134,8 +172,8 @@ export function extractName(input: string | Array<{ role: string; content: strin
     for (const re of introPatterns) {
       const m = text.match(re);
       if (m) {
-        const raw = m[1];
-        return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+        const candidate = normaliseFirstName(m[1]);
+        if (isPlausibleFirstName(candidate)) return candidate;
       }
     }
 
@@ -143,14 +181,13 @@ export function extractName(input: string | Array<{ role: string; content: strin
       /(?:^|\s)(?:i'?m|i am|my name(?:'s| is)|it'?s|call me)\s+([A-Z][a-z]{1,20})/i,
     );
     if (phraseMatch) {
-      const raw = phraseMatch[1];
-      return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+      const candidate = normaliseFirstName(phraseMatch[1]);
+      if (isPlausibleFirstName(candidate)) return candidate;
     }
-    const firstWord = text.match(/^([A-Z][a-z]{1,20})[.,!\s]/);
-    if (firstWord && !["The", "My", "Hi", "Hey", "So", "Ok"].includes(firstWord[1])) {
-      const raw = firstWord[1];
-      return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
-    }
+
+    // The old `firstWord` fallback used to fire here. Removed deliberately —
+    // it caught any capitalised opener ("Building a SaaS for X" → "Building")
+    // and was the root cause of the "Good afternoon, Building." bug.
   }
   return null;
 }

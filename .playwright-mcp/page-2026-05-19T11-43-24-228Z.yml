@@ -1,0 +1,48 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e6]
+        - generic [ref=e10]: Reid
+        - button "Open settings" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+      - navigation [ref=e15]:
+        - link "Home" [ref=e16] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e17]
+          - generic [ref=e20]: Home
+        - link "Goals" [ref=e21] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e22]
+          - generic [ref=e26]: Goals
+        - link "Reid" [ref=e27] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e28]
+          - generic [ref=e30]: Reid
+        - link "Noticed" [ref=e31] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e32]
+          - generic [ref=e35]: Noticed
+        - link "Plan" [ref=e36] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e37]
+          - generic [ref=e39]: Plan
+        - link "Tasks" [ref=e40] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e41]
+          - generic [ref=e44]: Tasks
+      - button "Open account menu" [ref=e65]:
+        - generic [ref=e67]: S
+        - generic [ref=e68]: Smoke
+    - main [ref=e45]:
+      - generic [ref=e47]:
+        - generic [ref=e48]:
+          - generic [ref=e49]:
+            - heading "What Reid's noticed" [level=1] [ref=e50]
+            - paragraph [ref=e51]: Patterns Reid keeps an eye on between sessions.
+          - button "Refresh observations" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+        - generic [ref=e58]:
+          - heading "Reid's still watching." [level=2] [ref=e69]
+          - paragraph [ref=e70]: Patterns take time to surface. Come back after a few sessions.
+  - alert [ref=e63]

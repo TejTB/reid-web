@@ -1,0 +1,9 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e22]
+  - generic [ref=e24]:
+    - img [ref=e27]
+    - heading "Reid" [level=1] [ref=e31]
+    - generic [ref=e32]:
+      - paragraph [ref=e33]: You found me. Now let's cut the noise.
+      - paragraph [ref=e34]: Ten questions. Then we get to work.
+      - button "Ready →" [ref=e35] [cursor=pointer]

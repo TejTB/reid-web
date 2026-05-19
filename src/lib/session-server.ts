@@ -129,6 +129,34 @@ export async function endSession(
   }
 }
 
+/** Drops the cached `generated_take` text on every observation, goal, and
+ *  task row for the given user. Called when a session wraps so the next
+ *  "Reid's take" click regenerates against the freshest founder context. */
+export async function clearGeneratedTakesForUser(
+  db: SupabaseClient,
+  userId: string,
+): Promise<void> {
+  // Three independent updates rather than a single RPC: avoids a custom
+  // pgfunction and keeps each table's RLS in scope.
+  await Promise.allSettled([
+    db
+      .from("observations")
+      .update({ generated_take: null })
+      .eq("user_id", userId)
+      .not("generated_take", "is", null),
+    db
+      .from("goals")
+      .update({ generated_take: null })
+      .eq("user_id", userId)
+      .not("generated_take", "is", null),
+    db
+      .from("tasks")
+      .update({ generated_take: null })
+      .eq("user_id", userId)
+      .not("generated_take", "is", null),
+  ]);
+}
+
 /** Bulk-inserts message rows for the given session/user. */
 export async function appendMessages(
   db: SupabaseClient,

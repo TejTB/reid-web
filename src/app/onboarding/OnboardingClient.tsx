@@ -2,10 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import LogoMark from "@/components/LogoMark";
-import ProgressLine from "@/components/ProgressLine";
 import ChatStream from "@/components/ChatStream";
-import ChatInput from "@/components/ChatInput";
-import OnboardingComplete from "@/components/OnboardingComplete";
+import { PromptInputBox } from "@/components/ui/prompt-input-box";
 import OnboardingIntro from "@/components/OnboardingIntro";
 import { useAuth } from "@/components/AuthProvider";
 import { streamReid } from "@/lib/reid";
@@ -27,6 +25,22 @@ import type { Message } from "@/types/chat";
 
 type Stage = "intro" | "chat";
 
+// Strips a single leading straight or curly double/single quote (with any
+// preceding whitespace). Used during streaming so the user never sees the
+// opener's wrapping `"` even for a frame.
+function stripLeadingQuote(s: string): string {
+  return s.replace(/^\s*["“”']/, "");
+}
+
+// Strips a single matching wrapping quote pair from both ends of the string.
+// Used on commit so the persisted message doesn't carry the model's literal
+// quotation of the onboarding opener.
+function stripWrappingQuotes(s: string): string {
+  let out = stripLeadingQuote(s);
+  out = out.replace(/["“”']\s*$/, "");
+  return out;
+}
+
 export default function OnboardingClient() {
   const router = useRouter();
   const { me, loading: authLoading, refresh } = useAuth();
@@ -37,13 +51,14 @@ export default function OnboardingClient() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  // Two-stage completion: first fade chat + input, then mount the overlay.
+  // Single-stage completion: fade the chat surface, then redirect. The
+  // older multi-second cinematic via OnboardingComplete made the wrap-up
+  // feel like the app was stalling instead of finishing — replaced with a
+  // 600ms fade-then-go so the founder lands on /home inside one second of
+  // Reid's final message.
   const [isCompleting, setIsCompleting] = useState(false);
-  const [showComplete, setShowComplete] = useState(false);
   const completionTriggered = useRef(false);
   const streamStarted = useRef(false);
-
-  const userTurnCount = messages.filter((m) => m.role === "user").length;
 
   async function triggerCompletion() {
     if (completionTriggered.current) return;
@@ -55,11 +70,16 @@ export default function OnboardingClient() {
     await refresh();
 
     setIsCompleting(true);
-    setTimeout(() => setShowComplete(true), 700);
-    setTimeout(() => router.replace("/home"), 2500);
+    setTimeout(() => router.replace("/home"), 600);
   }
 
   async function runStream(seed: Message[]) {
+    // The model is told to "use it exactly" for the onboarding opener and
+    // the prompt shows that line wrapped in quotes — so it sometimes emits
+    // the surrounding `"`. Strip them on the opener turn only; later
+    // messages may legitimately quote the founder back at them.
+    const isOpener = seed.length === 0;
+    const display = (s: string) => (isOpener ? stripLeadingQuote(s) : s);
     setIsStreaming(true);
     setStreamingText("");
     let acc = "";
@@ -70,7 +90,7 @@ export default function OnboardingClient() {
         messages: seed,
       })) {
         acc += chunk;
-        setStreamingText(acc);
+        setStreamingText(display(acc));
       }
     } catch {
       firstAttemptFailed = true;
@@ -89,7 +109,7 @@ export default function OnboardingClient() {
           messages: seed,
         })) {
           acc += chunk;
-          setStreamingText(acc);
+          setStreamingText(display(acc));
         }
       } catch {
         setMessages((prev) => [
@@ -111,8 +131,12 @@ export default function OnboardingClient() {
     // the server filter.
     const close = parseOnboardingClose(acc);
     const cleaned = close.hasSentinel ? close.body : acc;
+    const finalContent = isOpener ? stripWrappingQuotes(cleaned) : cleaned;
 
-    setMessages((prev) => [...prev, { role: "assistant", content: cleaned }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: finalContent },
+    ]);
     setStreamingText("");
     setIsStreaming(false);
 
@@ -233,15 +257,6 @@ export default function OnboardingClient() {
           Reid
         </span>
       </header>
-      <div
-        style={{
-          transition: "opacity 300ms ease",
-          opacity: isCompleting ? 0 : 1,
-          paddingBottom: 6,
-        }}
-      >
-        <ProgressLine current={Math.min(userTurnCount, 10)} total={10} />
-      </div>
       <ChatStream
         messages={messages}
         streamingText={streamingText}
@@ -249,18 +264,25 @@ export default function OnboardingClient() {
         faded={isCompleting}
       />
       <div
+        className="fixed left-0 right-0 z-50 bottom-[env(safe-area-inset-bottom)] px-4 pb-4 pt-2"
         style={{
           transition: "opacity 300ms ease",
           opacity: isCompleting ? 0 : 1,
           pointerEvents: isCompleting ? "none" : "auto",
         }}
       >
-        <ChatInput
-          onSubmit={handleSend}
-          disabled={isStreaming || isCompleting}
-        />
+        <div className="mx-auto max-w-[720px]">
+          <PromptInputBox
+            onSend={(message) => {
+              const trimmed = message.trim();
+              if (!trimmed) return;
+              void handleSend(trimmed);
+            }}
+            isLoading={isStreaming || isCompleting}
+            placeholder="What's the situation?"
+          />
+        </div>
       </div>
-      {showComplete && <OnboardingComplete />}
     </div>
   );
 }

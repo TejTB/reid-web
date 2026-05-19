@@ -1,0 +1,19 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - img [ref=e6]
+    - heading "Welcome back." [level=1] [ref=e10]
+    - generic [ref=e12]:
+      - paragraph [ref=e13]: Reid's been keeping notes.
+      - generic [ref=e14]:
+        - textbox "Email" [active] [ref=e15]
+        - textbox "Password" [ref=e16]
+        - button "Continue →" [disabled] [ref=e17]:
+          - generic [ref=e18]: Continue →
+      - generic [ref=e19]:
+        - paragraph [ref=e20]:
+          - text: No account?
+          - link "Start here →" [ref=e21] [cursor=pointer]:
+            - /url: /signup
+        - link "Forgot password?" [ref=e22] [cursor=pointer]:
+          - /url: /forgot-password
+  - alert [ref=e23]

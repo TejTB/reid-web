@@ -92,6 +92,7 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
     const [focused, setFocused] = React.useState(false);
     const uploadInputRef = React.useRef<HTMLInputElement>(null);
     const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+    const wasLoadingRef = React.useRef(false);
 
     React.useEffect(() => {
       const ta = textareaRef.current;
@@ -99,6 +100,19 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
       ta.style.height = "auto";
       ta.style.height = `${Math.min(ta.scrollHeight, 240)}px`;
     }, [input]);
+
+    // Re-focus the textarea the moment isLoading flips false. Covers both the
+    // post-send case (parent flipped isLoading on while streaming) and the
+    // post-receive case (stream ended, parent flipped it back off). Tracked
+    // via a ref so we only fire on the true→false transition, not on every
+    // false render — that would steal focus from anywhere else the user
+    // clicks while idle.
+    React.useEffect(() => {
+      if (wasLoadingRef.current && !isLoading) {
+        textareaRef.current?.focus();
+      }
+      wasLoadingRef.current = isLoading;
+    }, [isLoading]);
 
     const processFile = (file: File) => {
       if (!file.type.startsWith("image/")) return;

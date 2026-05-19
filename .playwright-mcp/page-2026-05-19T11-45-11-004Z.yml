@@ -1,0 +1,64 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e23]
+  - generic [ref=e24]:
+    - complementary [ref=e25]:
+      - generic [ref=e26]:
+        - img [ref=e28]
+        - generic [ref=e32]: Reid
+        - button "Open settings" [ref=e33] [cursor=pointer]:
+          - img [ref=e34]
+      - navigation [ref=e37]:
+        - link "Home" [ref=e38] [cursor=pointer]:
+          - /url: /home
+          - img [ref=e39]
+          - generic [ref=e42]: Home
+        - link "Goals" [ref=e43] [cursor=pointer]:
+          - /url: /goals
+          - img [ref=e44]
+          - generic [ref=e48]: Goals
+        - link "Reid" [ref=e49] [cursor=pointer]:
+          - /url: /chat
+          - img [ref=e50]
+          - generic [ref=e52]: Reid
+        - link "Noticed" [ref=e53] [cursor=pointer]:
+          - /url: /observations
+          - img [ref=e54]
+          - generic [ref=e57]: Noticed
+        - link "Plan" [ref=e58] [cursor=pointer]:
+          - /url: /plan
+          - img [ref=e59]
+          - generic [ref=e61]: Plan
+        - link "Tasks" [ref=e62] [cursor=pointer]:
+          - /url: /tasks
+          - img [ref=e63]
+          - generic [ref=e66]: Tasks
+      - button "Open account menu" [ref=e68]:
+        - generic [ref=e70]: S
+        - generic [ref=e71]: Smoke
+    - main [ref=e72]:
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - heading "Good afternoon, Smoke." [level=1] [ref=e76]
+          - paragraph [ref=e77]: Here's where things stand.
+        - generic [ref=e78]:
+          - generic [ref=e81]:
+            - generic [ref=e82]: YOUR FOCUS
+            - generic [ref=e83]:
+              - paragraph [ref=e84]: Sprint 9 smoke test — verifying home + tabs render with FullScreenCard.
+              - paragraph [ref=e87]: New ground
+          - generic [ref=e90]:
+            - generic [ref=e91]: TODAY'S TASK
+            - generic [ref=e92]:
+              - list [ref=e93]:
+                - listitem [ref=e94]:
+                  - checkbox "Mark task complete" [ref=e95] [cursor=pointer]
+                  - paragraph [ref=e96]: Talk to three users this week.
+              - paragraph [ref=e97]: 1 task · 0 done
+          - generic [ref=e100]:
+            - generic [ref=e101]: CONTINUE
+            - generic [ref=e102]:
+              - paragraph [ref=e103]: Pick up where you left off.
+              - link "Open session" [ref=e104] [cursor=pointer]:
+                - /url: /chat
+                - generic [ref=e105]: Open session
+                - img [ref=e106]

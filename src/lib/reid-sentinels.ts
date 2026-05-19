@@ -28,6 +28,7 @@ import {
   insertObservation,
   type OnboardingGoalInput,
 } from "./session-server";
+import { isPlausibleFirstName } from "./reid-summary";
 
 // ----- types --------------------------------------------------------------
 
@@ -220,13 +221,18 @@ export function parseSentinels(raw: string): ParsedSentinels {
   // ----- NAME_CAPTURED
   const nmMatch = working.match(NAME_CAPTURED_RE);
   if (nmMatch) {
-    // First-name only; normalise capitalisation so downstream UI doesn't
-    // have to. Reject obviously-bad payloads (empty, whitespace, too long).
+    // First token only, normalised, validated against the plausibility check.
+    // Rejecting at the parser layer prevents a model hallucination ("name=
+    // \"Building\"") from ever reaching the users.name column.
     const rawName = nmMatch[1].trim();
     const firstToken = rawName.split(/\s+/)[0] ?? "";
-    if (firstToken.length > 0 && firstToken.length <= 40) {
-      result.nameCaptured =
-        firstToken.charAt(0).toUpperCase() + firstToken.slice(1).toLowerCase();
+    const normalised =
+      firstToken.length > 0
+        ? firstToken.charAt(0).toUpperCase() +
+          firstToken.slice(1).toLowerCase()
+        : "";
+    if (isPlausibleFirstName(normalised)) {
+      result.nameCaptured = normalised;
     }
     working = working.replace(NAME_CAPTURED_RE, "");
   }

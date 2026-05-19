@@ -87,17 +87,6 @@ export default function OnboardingIntro({
           >
             You found me. Now let&apos;s cut the noise.
           </p>
-          <p
-            className="font-sans text-center"
-            style={{
-              fontSize: 14,
-              color: "#7A90A8",
-              lineHeight: 1.6,
-              maxWidth: 320,
-            }}
-          >
-            Ten questions. Then we get to work.
-          </p>
 
           <button
             type="button"

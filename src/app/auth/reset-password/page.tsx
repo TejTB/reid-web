@@ -61,7 +61,10 @@ function ResetInner() {
       setErrorMsg(err.message);
       return;
     }
-    router.replace("/home");
+    // Send to root — the server-side `/` resolver inspects users.onboarding_complete
+    // and routes to /home or /onboarding accordingly. Hard-coding /home would
+    // bounce mid-onboarding users back to onboarding via the proxy.
+    router.replace("/");
   }
 
   const disabled = submitting || !password;
