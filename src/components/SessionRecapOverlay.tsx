@@ -92,7 +92,7 @@ export function SessionRecapOverlay({ sessionId, onClose }: Props) {
                 fontSize: 18,
               }}
             >
-              Reid's writing it down…
+              Reid&apos;s writing it down…
             </motion.div>
           )}
         </AnimatePresence>

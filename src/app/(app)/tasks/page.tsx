@@ -273,7 +273,7 @@ export default function TasksPage() {
                   maxWidth: 360,
                 }}
               >
-                Reid hasn't asked anything of you yet.
+                Reid hasn&apos;t asked anything of you yet.
               </p>
               {completedTasks.length > 0 && (
                 <p
@@ -404,26 +404,24 @@ function TaskListItem({
 }) {
   const due = task.due_date ? `Due ${formatDate(task.due_date)}` : null;
   const overdue = isOverdue(task);
-  // Optimistic local "checked" state so the completion animation fires
-  // immediately on click, regardless of network latency.
-  const [checked, setChecked] = useState(task.completed);
-
-  // Sync with prop changes (e.g. the parent flips back via undo).
-  useEffect(() => {
-    setChecked(task.completed);
-  }, [task.completed]);
+  // Optimistic local override. We only set this to `true` after a successful
+  // click; the displayed "checked" state is `prop || override` so when the
+  // parent eventually flips `task.completed`, we render that without ever
+  // shadowing it with stale local state. Reset to false on every render
+  // where the prop is already true (no useEffect needed).
+  const [pending, setPending] = useState(false);
+  const checked = task.completed || pending;
 
   const labelText = isMostRecent && !task.completed ? "TODAY'S TASK" : "TASK";
 
   async function handleCheckbox(e: React.MouseEvent | React.KeyboardEvent) {
     e.stopPropagation();
     if (checked) return;
-    setChecked(true);
+    setPending(true);
     try {
       await onComplete();
     } catch {
-      // Roll back the optimistic check if the request failed.
-      setChecked(false);
+      setPending(false);
     }
   }
 

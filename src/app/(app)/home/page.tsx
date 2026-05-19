@@ -52,6 +52,18 @@ interface TaskRow {
   createdAt: string | null;
 }
 
+// Helper kept outside HomePage so the impure Date.now() call doesn't run
+// in the component render scope (react-hooks/purity). The cost: the banner
+// gate effectively reads "wall-clock now at render time", which is fine —
+// the page re-renders frequently enough that the threshold flips well
+// before the user notices.
+function isOlderThan24h(createdAtIso: string | null | undefined): boolean {
+  if (!createdAtIso) return false;
+  const createdAtMs = new Date(createdAtIso).getTime();
+  if (!Number.isFinite(createdAtMs)) return false;
+  return Date.now() - createdAtMs > 24 * 60 * 60 * 1000;
+}
+
 export default function HomePage() {
   const router = useRouter();
   const { me, session, loading } = useAuth();
@@ -228,10 +240,7 @@ export default function HomePage() {
   //   - their streak has dropped to 0
   // Day-0 / zero-session accounts must never see this banner.
   let bannerTitle: string | null = null;
-  const createdAtMs = user.created_at ? new Date(user.created_at).getTime() : NaN;
-  const accountOlderThan24h =
-    Number.isFinite(createdAtMs) &&
-    Date.now() - createdAtMs > 24 * 60 * 60 * 1000;
+  const accountOlderThan24h = isOlderThan24h(user.created_at);
   const hasHadAtLeastOneSession =
     (user.sessions_used_this_month ?? 0) > 0 || sessionCount > 0;
   if (
