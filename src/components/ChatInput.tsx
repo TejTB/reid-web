@@ -9,9 +9,9 @@ import { useEffect, useRef, useState } from "react";
 // This deliberately bypasses the global `.input-bar:focus-within` rule (which
 // painted the wrapper red), so the user sees ONE red ring on the textarea
 // and a subtle neutral wrapper border — never both at once.
-const WRAPPER_BORDER_IDLE = "1px solid rgba(255,255,255,0.07)";
-const WRAPPER_BORDER_FOCUS = "1px solid rgba(255,255,255,0.14)";
-const TEXTAREA_FOCUS_RING = "0 0 0 1px rgba(185,28,28,0.5)";
+const WRAPPER_BORDER_IDLE = "1px solid rgba(255,255,255,0.10)";
+const WRAPPER_BORDER_FOCUS = "1px solid rgba(255,255,255,0.20)";
+const TEXTAREA_FOCUS_RING = "0 0 0 3px rgba(185,28,28,0.15)";
 
 export default function ChatInput({
   onSubmit,
@@ -100,7 +100,7 @@ export default function ChatInput({
               submit();
             }
           }}
-          placeholder="Say something..."
+          placeholder="What's the situation?"
           className="flex-1 resize-none bg-transparent text-text-primary placeholder:text-text-dim text-[15px] leading-relaxed max-h-[180px]"
           style={{
             // Suppress the global `:focus-visible` outline (globals.css line ~51)

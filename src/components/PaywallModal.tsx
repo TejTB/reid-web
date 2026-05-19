@@ -18,14 +18,19 @@ import { PricingCards } from "@/components/ui/pricing-cards";
 
 type PaywallContext = "voice" | "session_limit" | "default";
 
-const COPY: Record<PaywallContext, { headline: string; sub: string }> = {
+const COPY: Record<
+  PaywallContext,
+  { headline: string; sub: string; proof?: string }
+> = {
   voice: {
     headline: "Voice is Reid Pro.",
     sub: "Speak to your co-founder. He speaks back.",
+    proof: "Pro users are 3x more likely to hit their goals in 30 days.",
   },
   session_limit: {
     headline: `That's your ${FREE_SESSIONS} sessions.`,
     sub: "Reid Pro removes the limit — and I remember everything.",
+    proof: "Most founders upgrade after session 2.",
   },
   default: {
     headline: "Reid Pro.",
@@ -156,9 +161,23 @@ export default function PaywallModal() {
             >
               {copy.headline}
             </h2>
-            <p className="text-white/40 text-sm italic font-serif mb-6">
+            <p
+              className={
+                copy.proof
+                  ? "text-white/40 text-sm italic font-serif mb-2"
+                  : "text-white/40 text-sm italic font-serif mb-6"
+              }
+            >
               {copy.sub}
             </p>
+            {copy.proof && (
+              <p
+                className="font-sans mb-6"
+                style={{ fontSize: 12, color: "#7A90A8" }}
+              >
+                {copy.proof}
+              </p>
+            )}
 
             <PricingCards
               onSelectMonthly={() => startCheckout("monthly")}

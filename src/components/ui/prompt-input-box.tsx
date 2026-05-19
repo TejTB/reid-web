@@ -85,10 +85,11 @@ interface PromptInputBoxProps {
 }
 
 export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxProps>(
-  ({ onSend = () => {}, isLoading = false, placeholder = "Say something...", className, onMicClick, inlineBadge }, ref) => {
+  ({ onSend = () => {}, isLoading = false, placeholder = "What's the situation?", className, onMicClick, inlineBadge }, ref) => {
     const [input, setInput] = React.useState("");
     const [files, setFiles] = React.useState<File[]>([]);
     const [previews, setPreviews] = React.useState<Record<string, string>>({});
+    const [focused, setFocused] = React.useState(false);
     const uploadInputRef = React.useRef<HTMLInputElement>(null);
     const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
@@ -126,10 +127,20 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
         <div
           ref={ref}
           className={cn(
-            "rounded-2xl border border-white/10 bg-[#0a0a0a] p-2 shadow-[0_8px_30px_rgba(0,0,0,0.4)] transition-colors",
-            isLoading && "border-[#B91C1C]/70",
+            "rounded-2xl bg-[#0a0a0a] p-2 shadow-[0_8px_30px_rgba(0,0,0,0.4)] transition-[border-color,box-shadow] duration-150",
             className,
           )}
+          style={{
+            border: isLoading
+              ? "1px solid rgba(185,28,28,0.70)"
+              : focused
+                ? "1px solid rgba(255,255,255,0.20)"
+                : "1px solid rgba(255,255,255,0.10)",
+            boxShadow:
+              focused && !isLoading
+                ? "0 8px 30px rgba(0,0,0,0.4), 0 0 0 3px rgba(185,28,28,0.15)"
+                : "0 8px 30px rgba(0,0,0,0.4)",
+          }}
           onDragOver={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -172,6 +183,8 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

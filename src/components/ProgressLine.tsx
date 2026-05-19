@@ -18,9 +18,8 @@ export default function ProgressLine({
       className="w-full flex items-center"
       style={{
         padding: "0 24px",
-        gap: 14,
       }}
-      aria-label={`Question ${clamped} of ${total}`}
+      aria-label="Onboarding progress"
     >
       <div
         style={{
@@ -41,17 +40,6 @@ export default function ProgressLine({
           }}
         />
       </div>
-      <span
-        className="font-sans"
-        style={{
-          fontSize: 11,
-          color: "#7A90A8",
-          letterSpacing: "0.04em",
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {clamped} / {total}
-      </span>
     </div>
   );
 }

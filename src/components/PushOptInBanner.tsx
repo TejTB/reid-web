@@ -17,7 +17,7 @@
 // We never block UI on the network. Errors are logged and swallowed; the user
 // either sees the system permission dialog or doesn't.
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 interface Props {
   name: string | null;
@@ -79,26 +79,36 @@ async function enablePush(): Promise<void> {
   }
 }
 
+// Empty subscribe — we never need to re-read after mount. The store snapshot
+// alone is enough to gate the banner on the client side without falling foul
+// of react-hooks/set-state-in-effect (no useEffect → no setState in effect).
+const subscribe = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
+
 export default function PushOptInBanner({ sessionCount }: Props) {
-  // Eligibility is decided client-side on mount. Server-render leaves the
-  // banner null so it never flashes during hydration.
-  const [eligible, setEligible] = useState(false);
+  const isClient = useSyncExternalStore(
+    subscribe,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
   const [dismissed, setDismissed] = useState(false);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (sessionCount !== 1 && sessionCount !== 2) return;
-    if (typeof Notification === "undefined") return;
-    if (Notification.permission !== "default") return;
+  function computeEligible(): boolean {
+    if (typeof window === "undefined") return false;
+    if (sessionCount !== 1 && sessionCount !== 2) return false;
+    if (typeof Notification === "undefined") return false;
+    if (Notification.permission !== "default") return false;
     try {
-      if (localStorage.getItem(STORAGE_KEY) === "true") return;
+      if (localStorage.getItem(STORAGE_KEY) === "true") return false;
     } catch {
       // localStorage unavailable; fall through and show the banner anyway.
     }
-    setEligible(true);
-  }, [sessionCount]);
+    return true;
+  }
 
-  if (!eligible || dismissed) return null;
+  if (!isClient || dismissed) return null;
+  if (!computeEligible()) return null;
 
   function handleEnable() {
     void enablePush().finally(() => setDismissed(true));

@@ -31,7 +31,7 @@ export default function AppSegmentError({
   return (
     <div className="reid-radial min-h-screen flex flex-col items-center justify-center px-6 gap-4">
       <p className="font-serif italic text-text-dim text-lg [text-wrap:pretty]">
-        Something went wrong.
+        My end is jammed.
       </p>
       <button
         type="button"

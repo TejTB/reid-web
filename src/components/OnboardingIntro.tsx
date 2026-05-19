@@ -85,7 +85,7 @@ export default function OnboardingIntro({
               maxWidth: 320,
             }}
           >
-            I&apos;m Reid. I help founders cut the noise.
+            You found me. Now let&apos;s cut the noise.
           </p>
           <p
             className="font-sans text-center"

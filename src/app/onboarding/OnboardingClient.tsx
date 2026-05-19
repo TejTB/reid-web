@@ -96,7 +96,7 @@ export default function OnboardingClient() {
           ...prev,
           {
             role: "assistant",
-            content: "Something's off on my end. Try again.",
+            content: "My end's jammed. Send it again.",
           },
         ]);
         setStreamingText("");

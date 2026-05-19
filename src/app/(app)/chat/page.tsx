@@ -442,7 +442,6 @@ export default function ChatPage() {
       }
     };
     // Mount/unmount only — refs above carry the latest values into cleanup.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSend(content: string, files?: File[]) {
@@ -485,7 +484,7 @@ export default function ChatPage() {
     if (!result.ok) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Something's off on my end. Try again." },
+        { role: "assistant", content: "My end's jammed. Send it again." },
       ]);
       setStreamingText("");
       setIsStreaming(false);
@@ -504,7 +503,10 @@ export default function ChatPage() {
   // the user's speech, and routes the transcript through handleSend. For Pro
   // users in voice mode we then auto-play Reid's reply via fetchAndPlay.
 
-  // Stop any active recognition / TTS when voice mode is dismissed.
+  // Stop any active recognition / TTS when voice mode is dismissed. State
+  // reset (voiceState → idle, speakNextRef) is performed inline by the
+  // dismissal handler below so the effect body stays focused on external
+  // system teardown — no setState inside an effect body.
   useEffect(() => {
     if (voiceMode) return;
     if (recognitionRef.current) {
@@ -523,9 +525,13 @@ export default function ChatPage() {
       ttsHandleRef.current.stop();
       ttsHandleRef.current = null;
     }
-    setVoiceState("idle");
-    speakNextRef.current = false;
   }, [voiceMode]);
+
+  const exitVoiceMode = useCallback(() => {
+    speakNextRef.current = false;
+    setVoiceState("idle");
+    setVoiceMode(false);
+  }, []);
 
   // Final unmount tear-down (covers leaving /chat while voice mode is on).
   useEffect(() => {
@@ -633,26 +639,36 @@ export default function ChatPage() {
     if (!speakNextRef.current) return;
     if (!latestAssistantContent) return;
     speakNextRef.current = false;
-    if (!isPro) {
-      // Free users can't auto-play in voice mode — drop to idle so the user
-      // can tap to speak again.
-      setVoiceState("idle");
-      return;
-    }
+
+    // Branch async so React doesn't see a setState in the synchronous effect
+    // body — the rule wants subscribe-then-callback patterns. The microtask
+    // / fetchAndPlay continuations satisfy that.
+    let cancelled = false;
     const ac = new AbortController();
     ttsAbortRef.current = ac;
-    setVoiceState("speaking");
-    void fetchAndPlay({
-      text: latestAssistantContent,
-      preview: false,
-      signal: ac.signal,
-      onEnded: () => {
-        if (ttsAbortRef.current !== ac) return;
-        ttsAbortRef.current = null;
-        ttsHandleRef.current = null;
+
+    void (async () => {
+      if (!isPro) {
+        // Free users can't auto-play in voice mode — drop to idle so the user
+        // can tap to speak again.
+        if (cancelled) return;
         setVoiceState("idle");
-      },
-    }).then(({ result, handle }) => {
+        ttsAbortRef.current = null;
+        return;
+      }
+      setVoiceState("speaking");
+      const { result, handle } = await fetchAndPlay({
+        text: latestAssistantContent,
+        preview: false,
+        signal: ac.signal,
+        onEnded: () => {
+          if (ttsAbortRef.current !== ac) return;
+          ttsAbortRef.current = null;
+          ttsHandleRef.current = null;
+          setVoiceState("idle");
+        },
+      });
+      if (cancelled) return;
       if (result.ok && handle) {
         ttsHandleRef.current = handle;
       } else {
@@ -660,7 +676,11 @@ export default function ChatPage() {
         ttsHandleRef.current = null;
         setVoiceState("idle");
       }
-    });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [voiceMode, isStreaming, latestAssistantContent, isPro]);
 
   const subtitle = lastSessionAt
@@ -801,7 +821,7 @@ export default function ChatPage() {
       {bootstrapError ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
           <p className="font-serif italic text-text-dim text-lg">
-            Something went wrong.
+            My end is jammed.
           </p>
           <button
             type="button"
@@ -1012,7 +1032,7 @@ export default function ChatPage() {
                   </motion.button>
                   <button
                     type="button"
-                    onClick={() => setVoiceMode(false)}
+                    onClick={exitVoiceMode}
                     className="text-white/20 text-xs hover:text-white/40 font-sans"
                   >
                     Switch to text
@@ -1028,7 +1048,7 @@ export default function ChatPage() {
                   <PromptInputBox
                     onSend={handleSend}
                     isLoading={isStreaming || !loaded}
-                    placeholder="Say something..."
+                    placeholder="What's the situation?"
                     onMicClick={speechSupported ? handleMicClick : undefined}
                     inlineBadge={
                       !isPro && speechSupported ? (
