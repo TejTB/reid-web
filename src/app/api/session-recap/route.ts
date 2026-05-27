@@ -2,43 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { anthropic, REID_MODEL } from "@/lib/anthropic";
+import { clampRecap, type RecapPayload } from "@/lib/recap";
 
 const Body = z.object({
   session_id: z.string().uuid(),
 });
-
-type RecapPayload = {
-  title: string;
-  summary: string;
-  commitments: string[];
-  reid_note: string;
-};
-
-// Loosely validate the model's JSON output — clamp lengths so a hallucination
-// can't blow up the recap overlay. The recap is always best-effort: a partial
-// recap is still better than no recap.
-function clampRecap(raw: unknown): RecapPayload {
-  const obj = (raw && typeof raw === "object" ? raw : {}) as Record<
-    string,
-    unknown
-  >;
-  const title =
-    typeof obj.title === "string" ? obj.title.trim().slice(0, 60) : "";
-  const summary =
-    typeof obj.summary === "string" ? obj.summary.trim().slice(0, 400) : "";
-  const reid_note =
-    typeof obj.reid_note === "string"
-      ? obj.reid_note.trim().slice(0, 200)
-      : "";
-  const commitments = Array.isArray(obj.commitments)
-    ? obj.commitments
-        .filter((c): c is string => typeof c === "string")
-        .map((c) => c.trim().slice(0, 160))
-        .filter((c) => c.length > 0)
-        .slice(0, 6)
-    : [];
-  return { title, summary, commitments, reid_note };
-}
 
 export async function POST(req: Request) {
   const authed = await getAuthedUser(req);
@@ -73,7 +41,7 @@ export async function POST(req: Request) {
   // has already been written (idempotent).
   const { data: sessionRow } = await authed.supabase
     .from("sessions")
-    .select("id, user_id, title, summary, reid_note")
+    .select("id, user_id, title, summary, reid_note, commitments, avoiding, mood")
     .eq("id", sessionId)
     .maybeSingle();
   if (!sessionRow || sessionRow.user_id !== userId) {
@@ -84,7 +52,11 @@ export async function POST(req: Request) {
       title: sessionRow.title,
       summary: sessionRow.summary,
       reid_note: sessionRow.reid_note,
-      commitments: [],
+      commitments: Array.isArray(sessionRow.commitments)
+        ? sessionRow.commitments
+        : [],
+      avoiding: sessionRow.avoiding ?? "",
+      mood: sessionRow.mood ?? "",
       cached: true,
     });
   }
@@ -103,9 +75,10 @@ export async function POST(req: Request) {
   const systemPrompt =
     "You are Reid, summarising the session that just ended. " +
     "Output ONE valid JSON object and nothing else. Schema: " +
-    `{ "title": "3-6 word session title", "summary": "2-3 plain sentences of what was decided", "commitments": ["short", "concrete", "task-like strings"], "reid_note": "ONE Reid voice sentence. Honest. Specific. Not corny." }. ` +
+    `{ "title": "3-6 word session title", "summary": "2-3 plain sentences of what was decided", "commitments": ["short", "concrete", "task-like strings"], "reid_note": "ONE Reid voice sentence. Honest. Specific. Not corny.", "avoiding": "one short phrase naming what the founder seems to be avoiding, or empty string", "mood": "one or two words for their mood, or empty string" }. ` +
     "Title is a fragment, not a sentence — like 'Noah outreach. First external user.' " +
     "reid_note is in Reid's voice (short, direct, never starts with 'I'). " +
+    "avoiding and mood may be empty strings if there is no clear signal. " +
     "Never wrap the JSON in backticks. Never include any text outside the JSON object.";
 
   let recap: RecapPayload;
@@ -140,17 +113,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "recap_failed" }, { status: 502 });
   }
 
-  // Persist title + reid_note + (only when generated) summary. Keep
-  // sessions.summary even if Reid already wrote one via the
-  // [SESSION_COMPLETE] sentinel — the recap's summary is usually richer.
   const update: {
     title: string | null;
     reid_note: string | null;
+    commitments: string[];
+    avoiding: string | null;
+    mood: string | null;
     summary?: string | null;
     ended_at?: string;
   } = {
     title: recap.title || null,
     reid_note: recap.reid_note || null,
+    commitments: recap.commitments,
+    avoiding: recap.avoiding || null,
+    mood: recap.mood || null,
   };
   if (recap.summary) update.summary = recap.summary;
   // Ensure ended_at is set even if the session-end path missed it (e.g. older
@@ -165,6 +141,8 @@ export async function POST(req: Request) {
     summary: recap.summary,
     commitments: recap.commitments,
     reid_note: recap.reid_note,
+    avoiding: recap.avoiding,
+    mood: recap.mood,
     cached: false,
   });
 }
