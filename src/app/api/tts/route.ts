@@ -83,13 +83,12 @@ export async function POST(req: NextRequest) {
     .select("id, subscription_status")
     .eq("auth_id", user.id)
     .maybeSingle();
-  const isPro = appUser?.subscription_status === "pro";
-  if (!preview && !isPro) {
-    return NextResponse.json({ error: "reid_pro_required" }, { status: 403 });
-  }
-
   if (!appUser?.id) {
     return NextResponse.json({ error: "user_not_provisioned" }, { status: 401 });
+  }
+  const isPro = appUser.subscription_status === "pro";
+  if (!preview && !isPro) {
+    return NextResponse.json({ error: "reid_pro_required" }, { status: 403 });
   }
   const rl = await checkVoiceRouteLimit(
     "tts",

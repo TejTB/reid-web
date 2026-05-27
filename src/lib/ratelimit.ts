@@ -110,6 +110,7 @@ async function checkSlidingWindow(
   pipe.zcard(key);
   pipe.expire(key, windowSec);
   const res = (await pipe.exec()) as unknown[];
+  // pipeline result order: [0] zremrangebyscore, [1] zadd, [2] zcard, [3] expire
   const count = Number(res[2] ?? 0);
 
   if (count <= limit) {
@@ -119,6 +120,7 @@ async function checkSlidingWindow(
   // Over the limit: remove the attempt we just logged so repeated blocked calls
   // don't keep extending the window, then report when the oldest call ages out.
   await redis.zrem(key, member);
+  // @upstash/redis returns withScores as a flat [member, score, ...] array
   const oldest = (await redis.zrange(key, 0, 0, { withScores: true })) as (
     | string
     | number
