@@ -31,3 +31,10 @@ test("voice:false behaves like text mode (no voice rules)", () => {
   const p = buildSystemPrompt("", { voice: false });
   assert.ok(!p.includes(VOICE_MODE_RULES), "explicit voice:false must exclude voice rules");
 });
+
+test("REID_VOICE carries the cold-open first line", () => {
+  assert.match(REID_VOICE, /I've been waiting\. What are you building\?/);
+  // and it survives composition into a no-context (cold) prompt
+  const cold = buildSystemPrompt("");
+  assert.match(cold, /I've been waiting\. What are you building\?/);
+});
