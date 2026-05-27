@@ -6,6 +6,7 @@ import { Redis } from "@upstash/redis";
 import { z } from "zod";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { checkVoiceRouteLimit } from "@/lib/ratelimit";
 
 // Reid's ElevenLabs voice. Pinned to a single id so the brand voice never
 // drifts. Output is mp3_44100_128 (the SDK's default) — adequate for chat
@@ -79,12 +80,27 @@ export async function POST(req: NextRequest) {
   const admin = supabaseAdmin();
   const { data: appUser } = await admin
     .from("users")
-    .select("subscription_status")
+    .select("id, subscription_status")
     .eq("auth_id", user.id)
     .maybeSingle();
   const isPro = appUser?.subscription_status === "pro";
   if (!preview && !isPro) {
     return NextResponse.json({ error: "reid_pro_required" }, { status: 403 });
+  }
+
+  if (!appUser?.id) {
+    return NextResponse.json({ error: "user_not_provisioned" }, { status: 401 });
+  }
+  const rl = await checkVoiceRouteLimit(
+    "tts",
+    appUser.id as string,
+    (appUser.subscription_status as string | null) ?? "free",
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "rate_limit_exceeded", retryAfter: rl.retryAfter },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+    );
   }
 
   const cleaned = cleanForSpeech(text);

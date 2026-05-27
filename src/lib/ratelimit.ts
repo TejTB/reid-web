@@ -72,3 +72,74 @@ export async function checkReidMinuteLimit(userId: string): Promise<{
   const ttl = await redis.ttl(key);
   return { allowed: false, retryAfter: ttl > 0 ? ttl : windowSec };
 }
+
+// ----- Voice route limits (transcribe + tts) -------------------------------
+//
+// Per-user, per-route sliding window over the last hour. Free users get 20
+// calls/hour/route; Pro users 60. Implemented as a Redis sorted-set log (one
+// entry per call, scored by timestamp) so the window truly slides rather than
+// resetting on a fixed boundary. Reuses the same @upstash/redis client and
+// REDIS_CONFIGURED guard as the limiters above.
+
+const VOICE_HOURLY_LIMIT_FREE = 20;
+const VOICE_HOURLY_LIMIT_PRO = 60;
+
+export type VoiceRoute = "transcribe" | "tts";
+
+/** Hourly call limit for a subscription_status. "pro" -> 60, anything else -> 20. */
+export function hourlyLimitFor(status: string | null | undefined): number {
+  return status === "pro" ? VOICE_HOURLY_LIMIT_PRO : VOICE_HOURLY_LIMIT_FREE;
+}
+
+async function checkSlidingWindow(
+  key: string,
+  limit: number,
+  windowSec: number,
+): Promise<{ allowed: boolean; retryAfter: number; remaining: number }> {
+  if (!REDIS_CONFIGURED) {
+    return { allowed: true, retryAfter: 0, remaining: limit };
+  }
+  const now = Date.now();
+  const windowMs = windowSec * 1000;
+  const member = `${now}-${Math.random().toString(36).slice(2)}`;
+
+  // Atomic: drop expired entries, log this call, count the window, refresh TTL.
+  const pipe = redis.multi();
+  pipe.zremrangebyscore(key, 0, now - windowMs);
+  pipe.zadd(key, { score: now, member });
+  pipe.zcard(key);
+  pipe.expire(key, windowSec);
+  const res = (await pipe.exec()) as unknown[];
+  const count = Number(res[2] ?? 0);
+
+  if (count <= limit) {
+    return { allowed: true, retryAfter: 0, remaining: Math.max(0, limit - count) };
+  }
+
+  // Over the limit: remove the attempt we just logged so repeated blocked calls
+  // don't keep extending the window, then report when the oldest call ages out.
+  await redis.zrem(key, member);
+  const oldest = (await redis.zrange(key, 0, 0, { withScores: true })) as (
+    | string
+    | number
+  )[];
+  let retryAfter = windowSec;
+  if (oldest.length >= 2) {
+    const oldestScore = Number(oldest[1]);
+    retryAfter = Math.max(1, Math.ceil((oldestScore + windowMs - now) / 1000));
+  }
+  return { allowed: false, retryAfter, remaining: 0 };
+}
+
+/** Sliding-window rate limit for the voice routes, keyed per user + route. */
+export async function checkVoiceRouteLimit(
+  route: VoiceRoute,
+  userId: string,
+  status: string | null | undefined,
+): Promise<{ allowed: boolean; retryAfter: number; remaining: number }> {
+  return checkSlidingWindow(
+    `reid:rl:voice:${route}:${userId}`,
+    hourlyLimitFor(status),
+    60 * 60,
+  );
+}

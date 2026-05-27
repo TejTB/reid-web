@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { validateAudioFile } from "@/lib/transcribe";
+import { checkVoiceRouteLimit } from "@/lib/ratelimit";
 
 // A Whisper call on a large recording can exceed Vercel's default function
 // timeout. Give it generous headroom.
@@ -13,6 +14,26 @@ export async function POST(req: NextRequest) {
   const authed = await getAuthedUser(req);
   if (!authed) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const { data: meRow } = await authed.supabase
+    .from("users")
+    .select("id, subscription_status")
+    .eq("auth_id", authed.user.id)
+    .maybeSingle();
+  if (!meRow?.id) {
+    return NextResponse.json({ error: "user_not_provisioned" }, { status: 401 });
+  }
+  const rl = await checkVoiceRouteLimit(
+    "transcribe",
+    meRow.id as string,
+    (meRow.subscription_status as string | null) ?? "free",
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "rate_limit_exceeded", retryAfter: rl.retryAfter },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+    );
   }
 
   if (!process.env.OPENAI_API_KEY) {
