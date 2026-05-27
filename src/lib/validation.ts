@@ -14,6 +14,7 @@ export const reidRequestSchema = z.object({
   mode: z.enum(["onboarding", "chat"]),
   sessionId: z.string().uuid().optional().nullable(),
   messages: z.array(messageSchema).max(200),
+  voice: z.boolean().optional(),
 });
 
 export type ReidRequestInput = z.infer<typeof reidRequestSchema>;
