@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { validateAudioFile } from "@/lib/transcribe";
 
+// A Whisper call on a large recording can exceed Vercel's default function
+// timeout. Give it generous headroom.
+export const maxDuration = 60;
+
 const WHISPER_URL = "https://api.openai.com/v1/audio/transcriptions";
 
 export async function POST(req: NextRequest) {
@@ -30,6 +34,8 @@ export async function POST(req: NextRequest) {
   const audio = file as File;
 
   const oaForm = new FormData();
+  // The native app records m4a; fall back to an m4a filename so Whisper can
+  // infer the format if the upload arrived without a name.
   oaForm.append("file", audio, audio.name || "audio.m4a");
   oaForm.append("model", "whisper-1");
 
