@@ -1,0 +1,17 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - img [ref=e6]
+    - heading "Before we start." [level=1] [ref=e10]
+    - generic [ref=e12]:
+      - paragraph [ref=e13]: Two minutes. Then we talk.
+      - generic [ref=e14]:
+        - textbox "Your name" [active] [ref=e15]
+        - textbox "Email" [ref=e16]
+        - textbox "Password (12+ chars, upper, digit)" [ref=e17]
+        - button "Begin →" [disabled] [ref=e18]:
+          - generic [ref=e19]: Begin →
+      - paragraph [ref=e21]:
+        - text: Been here before?
+        - link "Sign in →" [ref=e22] [cursor=pointer]:
+          - /url: /login
+  - alert [ref=e23]
