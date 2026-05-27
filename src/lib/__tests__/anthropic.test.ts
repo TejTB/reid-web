@@ -21,7 +21,13 @@ test("context block is prepended when provided", () => {
   assert.ok(p.indexOf("FOUNDER CONTEXT") < p.indexOf(REID_VOICE), "context comes first");
 });
 
-test("VOICE_MODE_RULES forbids lists and em-dashes guidance", () => {
-  assert.match(VOICE_MODE_RULES, /2 sentences/i);
-  assert.match(VOICE_MODE_RULES, /em-dash/i);
+test("composed voice prompt carries the 2-sentence + em-dash rules", () => {
+  const p = buildSystemPrompt("", { voice: true });
+  assert.match(p, /2 sentences/i);
+  assert.match(p, /em-dash/i);
+});
+
+test("voice:false behaves like text mode (no voice rules)", () => {
+  const p = buildSystemPrompt("", { voice: false });
+  assert.ok(!p.includes(VOICE_MODE_RULES), "explicit voice:false must exclude voice rules");
 });
