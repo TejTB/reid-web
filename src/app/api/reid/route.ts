@@ -364,6 +364,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "invalid body" }, { status: 400 });
   }
   const { mode, messages } = parsedBody.data;
+  const voice = parsedBody.data.voice ?? false;
   let sessionId: string | undefined =
     parsedBody.data.sessionId ?? undefined;
 
@@ -503,6 +504,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Mark this session as voice so the native app can meter free voice usage
+  // (and the recap/history surfaces can show the voice badge). Idempotent.
+  if (voice && sessionId) {
+    await db.from("sessions").update({ voice_used: true }).eq("id", sessionId);
+  }
+
   // Legacy conversations table: keep writing the user turn so existing
   // history-loading code (chat page) continues to work during the migration.
   const lastMessage = messages[messages.length - 1];
@@ -525,7 +532,7 @@ export async function POST(req: NextRequest) {
 
   // ----- Build the system prompt with FOUNDER CONTEXT ------------------
   const reidContext = await getReidContext(db, userId);
-  let systemPrompt = buildSystemPrompt(reidContext);
+  let systemPrompt = buildSystemPrompt(reidContext, { voice });
 
   // Read the session's current message_count BEFORE we stream so we can
   // inject a wrap-up nudge as we approach the 20-message cap. sessionId is
