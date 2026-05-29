@@ -363,7 +363,7 @@ export async function POST(req: NextRequest) {
   if (!parsedBody.success) {
     return Response.json({ error: "invalid body" }, { status: 400 });
   }
-  const { mode, messages } = parsedBody.data;
+  const { mode, messages, voice = false } = parsedBody.data;
   let sessionId: string | undefined =
     parsedBody.data.sessionId ?? undefined;
 
@@ -503,6 +503,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Flag voice sessions so the native voice entitlement gate (which counts
+  // sessions WHERE voice_used = true) is accurate. The native client sends
+  // `voice: true`; this used to be stripped by Zod and never persisted.
+  // Idempotent and cheap — one tiny update per voice turn.
+  if (voice && sessionId) {
+    await db.from("sessions").update({ voice_used: true }).eq("id", sessionId);
+  }
+
   // Legacy conversations table: keep writing the user turn so existing
   // history-loading code (chat page) continues to work during the migration.
   const lastMessage = messages[messages.length - 1];
@@ -532,6 +540,12 @@ export async function POST(req: NextRequest) {
   // guaranteed to be defined here (either client-supplied or just minted).
   const SESSION_HARD_CAP = 20;
   const SESSION_NUDGE_AT = 16;
+  // Onboarding has no hard cap and historically never wrapped: real voice
+  // onboarding sessions ran 30+ messages and the model never emitted
+  // [ONBOARDING_COMPLETE], so onboarding_complete/onboarding_summary were
+  // never written and Reid had no memory of onboarding. Nudge the close the
+  // same way chat does, just earlier (onboarding should be ~8-10 exchanges).
+  const ONBOARDING_NUDGE_AT = 14;
   const { data: preTurnSessionRow } = await db
     .from("sessions")
     .select("message_count")
@@ -545,6 +559,12 @@ export async function POST(req: NextRequest) {
       `\n\n[SESSION CHECKPOINT]\nYou are approaching the natural end of this session — about 3 messages from the wrap-up point. ` +
       `Begin moving the conversation toward a clear, concrete commitment from the founder. ` +
       `When ready, emit [SESSION_COMPLETE] with summary="..." task="...". Don't drag it out.`;
+  }
+  if (mode === "onboarding" && preTurnMessageCount >= ONBOARDING_NUDGE_AT) {
+    systemPrompt =
+      systemPrompt +
+      `\n\n[ONBOARDING CHECKPOINT]\nYou have enough to begin. Move to close NOW — confirm the single first task, then wrap by emitting ` +
+      `[ONBOARDING_COMPLETE] with summary="..." task="..." goals=[...]. Stop asking new questions.`;
   }
 
   // Build the upstream Anthropic messages array. Only the LAST user message

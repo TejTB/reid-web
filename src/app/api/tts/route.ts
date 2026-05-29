@@ -25,6 +25,11 @@ const CACHE_TTL_SECONDS = 60 * 60 * 24;
 const Schema = z.object({
   text: z.string().min(1).max(4000),
   preview: z.boolean().optional(),
+  // `preview` does two jobs: it bypasses the Pro gate AND truncates to a
+  // 12-word taste for the web upgrade nudge. The native voice loop needs the
+  // first without the second — Reid must speak his whole reply. `full: true`
+  // (only sent by native voice) keeps the gate bypass but plays the full text.
+  full: z.boolean().optional(),
 });
 
 // Accept either Vercel Marketplace KV (KV_REST_API_*) or upstream Upstash
@@ -71,7 +76,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
-  const { text, preview = false } = parsed.data;
+  const { text, preview = false, full = false } = parsed.data;
 
   // Gate full playback on Pro. Free users can request a preview (12 words)
   // unlimited times so the cache absorbs the cost; full-length text is
@@ -91,9 +96,12 @@ export async function POST(req: NextRequest) {
   if (cleaned.length === 0) {
     return NextResponse.json({ error: "empty_text" }, { status: 400 });
   }
-  const finalText = preview
-    ? cleaned.split(/\s+/).slice(0, PREVIEW_WORD_COUNT).join(" ")
-    : cleaned;
+  // Truncate to the taste only for the web preview nudge. Native voice
+  // (`full`) and Pro both speak the whole reply.
+  const finalText =
+    preview && !full
+      ? cleaned.split(/\s+/).slice(0, PREVIEW_WORD_COUNT).join(" ")
+      : cleaned;
 
   const cacheKey = `tts:${createHash("md5").update(finalText).digest("hex")}`;
 

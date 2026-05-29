@@ -78,42 +78,49 @@ export async function getReidContext(
   const user = userRow as ContextUser | null;
   if (!user) return "";
 
-  const { data: goalRows } = await db
-    .from("goals")
-    .select("*")
-    .eq("user_id", userId)
-    .order("is_primary", { ascending: false })
-    .order("created_at", { ascending: true });
+  // These four reads only depend on userId (not on each other), so run them
+  // concurrently. On Vercel→Supabase each round-trip is ~30-80ms; serialising
+  // them added ~150-300ms to time-to-first-token for no reason.
+  //
+  // Observations surface either legacy [OBSERVATION] sentinel rows (confidence
+  // medium/high) or new /api/observe rows (category set, confidence null) so
+  // Reid sees every diagnostic note regardless of which path wrote it.
+  const [
+    { data: goalRows },
+    { data: sessionRows },
+    { data: observationRows },
+    { data: eventRows },
+  ] = await Promise.all([
+    db
+      .from("goals")
+      .select("*")
+      .eq("user_id", userId)
+      .order("is_primary", { ascending: false })
+      .order("created_at", { ascending: true }),
+    db
+      .from("sessions")
+      .select("id, user_id, started_at, ended_at, summary, task_set, message_count")
+      .eq("user_id", userId)
+      .not("summary", "is", null)
+      .order("started_at", { ascending: false })
+      .limit(5),
+    db
+      .from("observations")
+      .select("id, user_id, session_id, text, confidence, category, created_at")
+      .eq("user_id", userId)
+      .or("category.not.is.null,confidence.in.(medium,high)")
+      .order("created_at", { ascending: false })
+      .limit(8),
+    db
+      .from("goal_events")
+      .select("id, goal_id, user_id, session_id, delta, note, created_at, goals(title)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(10),
+  ]);
   const goals = (goalRows ?? []) as Goal[];
-
-  const { data: sessionRows } = await db
-    .from("sessions")
-    .select("id, user_id, started_at, ended_at, summary, task_set, message_count")
-    .eq("user_id", userId)
-    .not("summary", "is", null)
-    .order("started_at", { ascending: false })
-    .limit(5);
   const recentSessions = (sessionRows ?? []) as Session[];
-
-  // Surface either:
-  //   - legacy [OBSERVATION] sentinel rows (confidence in medium/high), or
-  //   - new /api/observe rows (category set, confidence null)
-  // so Reid sees every diagnostic note regardless of which path wrote it.
-  const { data: observationRows } = await db
-    .from("observations")
-    .select("id, user_id, session_id, text, confidence, category, created_at")
-    .eq("user_id", userId)
-    .or("category.not.is.null,confidence.in.(medium,high)")
-    .order("created_at", { ascending: false })
-    .limit(8);
   const observations = (observationRows ?? []) as Observation[];
-
-  const { data: eventRows } = await db
-    .from("goal_events")
-    .select("id, goal_id, user_id, session_id, delta, note, created_at, goals(title)")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(10);
   const eventsRaw = (eventRows ?? []) as Array<
     GoalEvent & { goals: { title: string } | { title: string }[] | null }
   >;

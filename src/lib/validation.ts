@@ -14,6 +14,11 @@ export const reidRequestSchema = z.object({
   mode: z.enum(["onboarding", "chat"]),
   sessionId: z.string().uuid().optional().nullable(),
   messages: z.array(messageSchema).max(200),
+  // Set true by the native voice client so the server can flag the session
+  // as voice (sessions.voice_used) — used by the voice entitlement gate.
+  // Previously absent here, so Zod silently stripped it and voice_used never
+  // persisted.
+  voice: z.boolean().optional(),
 });
 
 export type ReidRequestInput = z.infer<typeof reidRequestSchema>;
