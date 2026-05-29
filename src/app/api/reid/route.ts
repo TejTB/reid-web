@@ -455,6 +455,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Pro is exempt from BOTH the daily quota and the per-minute burst limiter.
+  // (Voice turns hit /api/transcribe + /api/reid, which share the same minute
+  // key, so a non-exempt pro tester would cap out at ~4 turns/min.)
   if (subscriptionStatus !== "pro") {
     const rate = await checkDailyMessageLimit(userId);
     if (!rate.allowed) {
@@ -463,24 +466,24 @@ export async function POST(req: NextRequest) {
         { status: 429 },
       );
     }
-  }
 
-  const minute = await checkReidMinuteLimit(userId);
-  if (!minute.allowed) {
-    return Response.json(
-      {
-        error: "rate_limit_exceeded",
-        retryAfter: minute.retryAfter,
-      },
-      {
-        status: 429,
-        headers: {
-          "Retry-After": String(minute.retryAfter),
-          "X-RateLimit-Limit": "8",
-          "X-RateLimit-Remaining": "0",
+    const minute = await checkReidMinuteLimit(userId);
+    if (!minute.allowed) {
+      return Response.json(
+        {
+          error: "rate_limit_exceeded",
+          retryAfter: minute.retryAfter,
         },
-      },
-    );
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(minute.retryAfter),
+            "X-RateLimit-Limit": "8",
+            "X-RateLimit-Remaining": "0",
+          },
+        },
+      );
+    }
   }
 
   if (!sessionId) {
