@@ -179,6 +179,14 @@ export function useVoiceLoop(opts: UseVoiceLoopOptions): UseVoiceLoopReturn {
         preview: false,
         sessionId: getSessionId() ?? undefined,
         signal: ac.signal,
+        onPlay: () => {
+          // Truthful onset: flip to `speaking` only when the audio element is
+          // actually rendering sound (the `playing` event), NOT when we kicked
+          // off the fetch. `thinking` covers TTS fetch/decode latency, so the
+          // orb's pulse never starts during silence on buffered TTS.
+          if (ttsAbortRef.current !== ac) return;
+          dispatch({ type: "REPLY_READY" });
+        },
         onEnded: () => {
           if (ttsAbortRef.current !== ac) return;
           ttsAbortRef.current = null;
@@ -274,8 +282,9 @@ export function useVoiceLoop(opts: UseVoiceLoopOptions): UseVoiceLoopReturn {
         );
         return;
       }
-      // → speaking
-      dispatch({ type: "REPLY_READY" });
+      // Stay in `thinking` through TTS fetch/decode. speak() dispatches
+      // REPLY_READY (→ speaking) from the audio element's real `playing` event,
+      // so the orb's pulse onset is truthful with no silent gap.
       void speak(outcome.replyText);
     },
     [getAccessToken, runReidTurn, speak, stopTracks],

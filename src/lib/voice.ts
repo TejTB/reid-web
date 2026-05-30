@@ -169,7 +169,10 @@ export async function fetchAndPlay(
     onEnded();
   });
   if (onPlay) {
-    audio.addEventListener("play", onPlay, { once: true });
+    // `playing` (not `play`): fires when audio is actually rendering sound,
+    // after any buffer/decode — so callers that key UI off playback onset
+    // (e.g. the voice orb's speaking pulse) stay truthful with no silent gap.
+    audio.addEventListener("playing", onPlay, { once: true });
   }
 
   try {
