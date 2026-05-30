@@ -81,6 +81,11 @@ export interface TtsPlaybackHandle {
 interface FetchAndPlayOptions {
   text: string;
   preview: boolean;
+  /** The current session id, when known. Forwarded to /api/tts so the server
+   *  excludes THIS session from the entitlement count — a free user within
+   *  allowance gets full voice during their one allowed session without it
+   *  walling itself (Sprint 12 self-count fix). Omit when unknown. */
+  sessionId?: string;
   /** Called when audio finishes naturally OR errors. NOT called on stop(). */
   onEnded: () => void;
   /** Called once the audio is loaded and starts playing. */
@@ -96,7 +101,7 @@ interface FetchAndPlayOptions {
 export async function fetchAndPlay(
   options: FetchAndPlayOptions,
 ): Promise<{ result: TtsResult; handle: TtsPlaybackHandle | null }> {
-  const { text, preview, onEnded, onPlay, signal } = options;
+  const { text, preview, sessionId, onEnded, onPlay, signal } = options;
 
   // Attach the current Supabase access token so /api/tts can authenticate
   // even when the request is initiated from a context where cookies might
@@ -118,7 +123,9 @@ export async function fetchAndPlay(
     res = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeader },
-      body: JSON.stringify({ text, preview }),
+      body: JSON.stringify(
+        sessionId ? { text, preview, sessionId } : { text, preview },
+      ),
       signal,
     });
   } catch (err) {

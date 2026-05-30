@@ -12,9 +12,20 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import type { User } from "@/types/db";
 
+// Sprint 12 — the server-computed entitlement seam. Mirrors GET /api/entitlement.
+// Build 3 repoints the six legacy counter readers to consume this; for now it
+// is established alongside `me` without changing any existing reader.
+export interface Entitlement {
+  sessionsUsed: number;
+  allowance: number;
+  isPro: boolean;
+  entitled: boolean;
+}
+
 type AuthContextValue = {
   session: Session | null;
   me: User | null;
+  entitlement: Entitlement | null;
   loading: boolean;
   refresh: () => Promise<void>;
 };
@@ -22,6 +33,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue>({
   session: null,
   me: null,
+  entitlement: null,
   loading: true,
   refresh: async () => {},
 });
@@ -29,6 +41,7 @@ const AuthContext = createContext<AuthContextValue>({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [me, setMe] = useState<User | null>(null);
+  const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -54,8 +67,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
       setMe((data as User | null) ?? null);
+
+      // Fetch the server-computed entitlement seam. Non-fatal: on failure we
+      // leave the previous value so a transient error doesn't flip the UI.
+      try {
+        const res = await fetch("/api/entitlement", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (res.ok) {
+          setEntitlement((await res.json()) as Entitlement);
+        }
+      } catch (err) {
+        console.error("[AuthProvider] entitlement fetch failed:", err);
+      }
     } else {
       setMe(null);
+      setEntitlement(null);
     }
     setLoading(false);
   }, []);
@@ -77,8 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo(
-    () => ({ session, me, loading, refresh }),
-    [session, me, loading, refresh],
+    () => ({ session, me, entitlement, loading, refresh }),
+    [session, me, entitlement, loading, refresh],
   );
 
   return (
@@ -100,4 +127,10 @@ export function useUserId(): string | null {
 
 export function useIsPro(): boolean {
   return useContext(AuthContext).me?.subscription_status === "pro";
+}
+
+// Sprint 12 — the server-computed entitlement seam. Returns null until the
+// first fetch resolves. Build 3 migrates the legacy counter readers onto this.
+export function useEntitlement(): Entitlement | null {
+  return useContext(AuthContext).entitlement;
 }

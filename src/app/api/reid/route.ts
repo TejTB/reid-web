@@ -19,7 +19,7 @@ import {
 } from "@/lib/session-server";
 import { reidRequestSchema } from "@/lib/validation";
 import { checkDailyMessageLimit, checkReidMinuteLimit } from "@/lib/ratelimit";
-import { FREE_SESSIONS } from "@/lib/session-shared";
+import { getEntitlement } from "@/lib/entitlement";
 
 // ----- SentinelStripper ---------------------------------------------------
 //
@@ -415,14 +415,22 @@ export async function POST(req: NextRequest) {
   // Free-tier session-limit gate (402). Onboarding is exempt — it's the
   // founder's first interaction with Reid and must always be allowed.
   //
-  // Monthly reset preamble: if the stored month-start is in a prior month,
-  // zero the counter before checking. This keeps the gate idempotent — a
-  // user who returns after the calendar flips gets a clean 5 sessions.
+  // Authorization is delegated to getEntitlement (Sprint 12): the SINGLE
+  // source of truth shared with /api/tts. It counts message-bearing,
+  // non-onboarding sessions live (lifetime) against FREE_SESSION_ALLOWANCE and
+  // bypasses for Pro. Evaluated here at session-START (before createSession),
+  // so the not-yet-created session can't wall itself; resuming an existing
+  // session sets creatingNewSession=false and skips this gate entirely.
+  //
+  // The legacy users.sessions_used_this_month counter is STILL maintained
+  // below (monthly reset here + increment at createSession) because six client
+  // surfaces still read it; Sprint 12 Build 3 repoints them and retires it.
   if (
     creatingNewSession &&
     mode === "chat" &&
     subscriptionStatus !== "pro"
   ) {
+    // Legacy monthly-counter maintenance (display only, not authorization).
     if (sessionsMonthStartIso) {
       const monthStart = new Date(sessionsMonthStartIso);
       const now = new Date();
@@ -444,11 +452,13 @@ export async function POST(req: NextRequest) {
         sessionsUsedThisMonth = 0;
       }
     }
-    if (sessionsUsedThisMonth >= FREE_SESSIONS) {
+
+    const entitlement = await getEntitlement(db, authUser.id);
+    if (!entitlement.entitled) {
       return Response.json(
         {
           error: "session_limit_reached",
-          sessionsUsed: sessionsUsedThisMonth,
+          sessionsUsed: entitlement.sessionsUsed,
         },
         { status: 402 },
       );

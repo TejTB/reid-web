@@ -5,7 +5,8 @@ import { ElevenLabsClient } from "elevenlabs";
 import { Redis } from "@upstash/redis";
 import { z } from "zod";
 import { getAuthedUser } from "@/lib/supabase-auth";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { getEntitlement } from "@/lib/entitlement";
+import { checkReidMinuteLimit } from "@/lib/ratelimit";
 
 // Reid's ElevenLabs voice. Pinned to a single id so the brand voice never
 // drifts. Output is mp3_44100_128 (the SDK's default) — adequate for chat
@@ -24,12 +25,18 @@ const CACHE_TTL_SECONDS = 60 * 60 * 24;
 
 const Schema = z.object({
   text: z.string().min(1).max(4000),
+  // RENDERING HINTS ONLY (Sprint 12) — never authorization. `preview` truncates
+  // the spoken text to a 12-word taste for the web upgrade nudge; `full`
+  // suppresses that truncation so Reid speaks his whole reply. Authorization is
+  // decided server-side by getEntitlement, NOT by these flags — the old
+  // `preview`/`full` gate-bypass is gone.
   preview: z.boolean().optional(),
-  // `preview` does two jobs: it bypasses the Pro gate AND truncates to a
-  // 12-word taste for the web upgrade nudge. The native voice loop needs the
-  // first without the second — Reid must speak his whole reply. `full: true`
-  // (only sent by native voice) keeps the gate bypass but plays the full text.
   full: z.boolean().optional(),
+  // The session this playback belongs to, when known (web voice loop). It is
+  // EXCLUDED from the entitlement count so a free user within allowance gets
+  // full voice DURING their one allowed session without that session walling
+  // itself. Optional: native sends none (nothing to exclude), which is correct.
+  sessionId: z.string().uuid().optional(),
 });
 
 // Accept either Vercel Marketplace KV (KV_REST_API_*) or upstream Upstash
@@ -64,6 +71,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const user = authed.user;
+  const db = authed.supabase;
 
   let body: unknown;
   try {
@@ -76,20 +84,33 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
-  const { text, preview = false, full = false } = parsed.data;
+  const { text, preview = false, full = false, sessionId } = parsed.data;
 
-  // Gate full playback on Pro. Free users can request a preview (12 words)
-  // unlimited times so the cache absorbs the cost; full-length text is
-  // Pro-only and matches the behaviour of the previous /api/voice route.
-  const admin = supabaseAdmin();
-  const { data: appUser } = await admin
-    .from("users")
-    .select("subscription_status")
-    .eq("auth_id", user.id)
-    .maybeSingle();
-  const isPro = appUser?.subscription_status === "pro";
-  if (!preview && !isPro) {
+  // Authorization (Sprint 12): full playback requires entitlement — Pro OR
+  // within the free allowance — decided server-side by getEntitlement, the
+  // SAME check /api/reid's 402 uses. The current session is excluded from the
+  // count so it can't wall itself. `preview`/`full` no longer authorize
+  // anything; the bypass is gone. A `preview` taste stays available to anyone
+  // (cache absorbs the cost), so an exhausted free user still hears the nudge.
+  const entitlement = await getEntitlement(db, user.id, {
+    excludeSessionId: sessionId,
+  });
+  if (!preview && !entitlement.entitled) {
     return NextResponse.json({ error: "reid_pro_required" }, { status: 403 });
+  }
+
+  // Burst protection (8/min/user), shared key with /api/reid + /api/transcribe.
+  // Closes the previously-uncapped ElevenLabs cost/abuse surface on this route.
+  // Pro is exempt (voice turns hit transcribe + reid + tts on the same minute
+  // key; a non-exempt Pro tester would cap out mid-conversation).
+  if (!entitlement.isPro) {
+    const limit = await checkReidMinuteLimit(user.id);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: "rate_limited" },
+        { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
+      );
+    }
   }
 
   const cleaned = cleanForSpeech(text);

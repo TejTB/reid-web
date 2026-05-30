@@ -686,6 +686,11 @@ function ChatPageInner() {
       const { result, handle } = await fetchAndPlay({
         text: latestAssistantContent,
         preview: false,
+        // Exclude the current session from the entitlement count so it can't
+        // wall itself (Sprint 12 self-count fix). Pro bypasses the count, so
+        // this is a no-op for today's Pro-only auto-play path, but it
+        // establishes the correct seam for the Build 2 free-voice loop.
+        sessionId: sessionIdRef.current ?? undefined,
         signal: ac.signal,
         onEnded: () => {
           if (ttsAbortRef.current !== ac) return;
