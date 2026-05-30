@@ -506,10 +506,23 @@ body {
 /* ---- per-state overrides (all transform/opacity; layers reused) ---------- */
 
 /* RECORDING — lean in: orb scales up a touch, atmosphere tightens, faster core
-   so it reads attentive (mic is live). */
-.reid-orb[data-orb-state="recording"] { animation-duration: 4.5s; transform: scale(1.04); }
+   so it reads attentive (mic is live). The lean-in MUST be a keyframe, not a
+   static `transform` — the shell runs orb-breathe, and a running animation's
+   transform always beats a declared one, so a static scale here would be
+   silently ignored. orb-breathe-lean is orb-breathe raised to a ~1.04 baseline. */
+.reid-orb[data-orb-state="recording"] { animation: orb-breathe-lean 4.5s ease-in-out infinite; }
 .reid-orb[data-orb-state="recording"] .reid-orb__core { animation-duration: 3.1s; }
-.reid-orb[data-orb-state="recording"] .reid-orb__atmosphere { animation-duration: 5.3s; transform: scale(0.97); }
+.reid-orb[data-orb-state="recording"] .reid-orb__atmosphere { animation: orb-atmosphere-tight 5.3s ease-in-out infinite; }
+@keyframes orb-breathe-lean {
+  0%   { transform: scale(1.03); }
+  50%  { transform: scale(1.055); }
+  100% { transform: scale(1.03); }
+}
+@keyframes orb-atmosphere-tight {
+  0%   { transform: scale(0.95) translate(0, 0); opacity: 0.82; }
+  50%  { transform: scale(1.0) translate(-0.5%, 0.4%); opacity: 1; }
+  100% { transform: scale(0.95) translate(0, 0); opacity: 0.82; }
+}
 
 /* TRANSCRIBING — leans toward thinking (post-mic processing), not recording:
    asymmetric shimmer begins, slightly calmer than full thinking. */
