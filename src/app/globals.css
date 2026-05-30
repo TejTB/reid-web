@@ -360,3 +360,234 @@ body {
   inset: -10px;
   border-width: 10px;
 }
+
+/* ============================================================================
+   ReidOrb — Sprint 12 Build 2b. The voice centerpiece.
+   Soft layered glow sphere: stacked radial layers (volumetric depth), an
+   off-center inner highlight, a #8E1616 core blooming into the #0A1628 bg with
+   no hard edge, and a faint noise overlay to kill banding. All per-state motion
+   is transform/opacity only and derives from these same layers. Organic feel
+   comes from layering animations at NON-HARMONIC (coprime) durations so the
+   composite never visibly loops. Driven by [data-orb-state] set from the voice
+   FSM. prefers-reduced-motion handled at the bottom (no motion; speaking stays
+   distinguishable via brightness/opacity, not movement).
+   ============================================================================ */
+
+.reid-orb {
+  --orb-core: #8E1616;
+  position: relative;
+  width: var(--orb-size, 240px);
+  height: var(--orb-size, 240px);
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  /* The whole orb breathes; layers add asymmetric life on top. */
+  will-change: transform, opacity;
+}
+
+/* Shared base for every radial layer. */
+.reid-orb__layer {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  will-change: transform, opacity;
+  transform-origin: 50% 50%;
+}
+
+/* Outer atmosphere — widest, faintest bloom into the bg, no hard edge.
+   Softness comes from the gradient stops, NOT a filter: blur — blur on a
+   continuously-animated layer forces a per-frame recomposite and drops frames
+   on mobile Safari. Extra intermediate stops replace the blur's softness so
+   the bloom is just as smooth at 60fps. (transform/opacity only.) */
+.reid-orb__atmosphere {
+  background: radial-gradient(
+    circle at 50% 52%,
+    rgba(142, 22, 22, 0.42) 0%,
+    rgba(142, 22, 22, 0.3) 24%,
+    rgba(142, 22, 22, 0.18) 40%,
+    rgba(142, 22, 22, 0.08) 56%,
+    rgba(142, 22, 22, 0.03) 68%,
+    rgba(10, 22, 40, 0) 80%
+  );
+  animation: orb-atmosphere 13s ease-in-out infinite;
+}
+
+/* Mid halo — the body of the sphere. Softness via stops, no filter: blur
+   (see atmosphere note). */
+.reid-orb__halo {
+  inset: 12%;
+  background: radial-gradient(
+    circle at 50% 54%,
+    rgba(168, 26, 26, 0.85) 0%,
+    rgba(150, 23, 23, 0.78) 28%,
+    rgba(142, 22, 22, 0.6) 46%,
+    rgba(108, 16, 16, 0.34) 66%,
+    rgba(40, 16, 22, 0.12) 78%,
+    rgba(10, 22, 40, 0) 88%
+  );
+  animation: orb-halo 11s ease-in-out infinite;
+}
+
+/* Core — densest, the #8E1616 heart. */
+.reid-orb__core {
+  inset: 26%;
+  background: radial-gradient(
+    circle at 46% 44%,
+    #b41d1d 0%,
+    var(--orb-core) 40%,
+    #6c1010 74%,
+    rgba(54, 8, 8, 0) 100%
+  );
+  animation: orb-core 7s ease-in-out infinite;
+}
+
+/* Off-center inner highlight — dimensionality; never concentric. No
+   mix-blend-mode: blend modes force the compositor to read the backdrop every
+   frame on an animated layer (mobile-Safari jank). A warm semi-opaque
+   rgba highlight reads correctly over the red core on the known #0A1628 bg
+   without it. (transform/opacity only.) */
+.reid-orb__highlight {
+  inset: 26%;
+  background: radial-gradient(
+    circle at 38% 34%,
+    rgba(255, 230, 214, 0.42) 0%,
+    rgba(255, 198, 170, 0.16) 16%,
+    rgba(255, 200, 180, 0.04) 30%,
+    rgba(255, 255, 255, 0) 44%
+  );
+  animation: orb-highlight 17s ease-in-out infinite;
+}
+
+/* Faint noise/dither overlay — kills gradient banding on the dark bg.
+   Inline SVG fractal noise, low opacity, masked to the orb circle. */
+.reid-orb__noise {
+  inset: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-size: 140px 140px;
+  /* Plain low-opacity dither, no mix-blend-mode. Blend modes force the
+     compositor to sample the backdrop each frame; on the near-black bg a
+     slightly higher plain opacity gives the same banding-kill at 60fps. */
+  opacity: 0.05;
+  -webkit-mask: radial-gradient(circle at 50% 50%, #000 60%, transparent 78%);
+  mask: radial-gradient(circle at 50% 50%, #000 60%, transparent 78%);
+}
+
+/* Coprime base keyframes — durations 7 / 11 / 13 / 17s never re-align, so the
+   composite drift never visibly repeats. Transform + opacity only. */
+@keyframes orb-core {
+  0%   { transform: scale(1) translate(0, 0); opacity: 0.92; }
+  50%  { transform: scale(1.045) translate(0.5%, -0.6%); opacity: 1; }
+  100% { transform: scale(1) translate(0, 0); opacity: 0.92; }
+}
+@keyframes orb-halo {
+  0%   { transform: scale(1.01) translate(-0.4%, 0.3%); opacity: 0.88; }
+  50%  { transform: scale(0.985) translate(0.6%, 0.5%); opacity: 1; }
+  100% { transform: scale(1.01) translate(-0.4%, 0.3%); opacity: 0.88; }
+}
+@keyframes orb-atmosphere {
+  0%   { transform: scale(1) translate(0, 0); opacity: 0.8; }
+  50%  { transform: scale(1.06) translate(-0.5%, 0.4%); opacity: 1; }
+  100% { transform: scale(1) translate(0, 0); opacity: 0.8; }
+}
+@keyframes orb-highlight {
+  0%   { transform: translate(0, 0); opacity: 0.7; }
+  50%  { transform: translate(1.5%, 1.2%); opacity: 0.95; }
+  100% { transform: translate(0, 0); opacity: 0.7; }
+}
+
+/* The orb shell breathes slowly as a whole (idle baseline). */
+.reid-orb { animation: orb-breathe 9s ease-in-out infinite; }
+@keyframes orb-breathe {
+  0%   { transform: scale(0.99); }
+  50%  { transform: scale(1.01); }
+  100% { transform: scale(0.99); }
+}
+
+/* ---- per-state overrides (all transform/opacity; layers reused) ---------- */
+
+/* RECORDING — lean in: orb scales up a touch, atmosphere tightens, faster core
+   so it reads attentive (mic is live). */
+.reid-orb[data-orb-state="recording"] { animation-duration: 4.5s; transform: scale(1.04); }
+.reid-orb[data-orb-state="recording"] .reid-orb__core { animation-duration: 3.1s; }
+.reid-orb[data-orb-state="recording"] .reid-orb__atmosphere { animation-duration: 5.3s; transform: scale(0.97); }
+
+/* TRANSCRIBING — leans toward thinking (post-mic processing), not recording:
+   asymmetric shimmer begins, slightly calmer than full thinking. */
+.reid-orb[data-orb-state="transcribing"] .reid-orb__core { animation-duration: 2.9s; }
+.reid-orb[data-orb-state="transcribing"] .reid-orb__halo { animation-duration: 3.7s; }
+.reid-orb[data-orb-state="transcribing"] .reid-orb__highlight { animation-duration: 4.3s; }
+
+/* THINKING — asymmetric shimmer across layers at tight coprime durations so
+   the surface flickers with thought; highlight roams more. */
+.reid-orb[data-orb-state="thinking"] .reid-orb__core { animation-duration: 2.3s; }
+.reid-orb[data-orb-state="thinking"] .reid-orb__halo { animation-duration: 3.1s; }
+.reid-orb[data-orb-state="thinking"] .reid-orb__atmosphere { animation-duration: 3.7s; }
+.reid-orb[data-orb-state="thinking"] .reid-orb__highlight { animation-duration: 2.9s; opacity: 1; }
+
+/* SPEAKING — event-driven organic pulse. The class is applied only while the
+   audio element is actually playing (truthful onset). Two coprime pulse layers
+   so the swell feels organic, never a mechanical sine. */
+.reid-orb[data-orb-state="speaking"] .reid-orb__core { animation: orb-pulse-a 1.7s ease-in-out infinite; }
+.reid-orb[data-orb-state="speaking"] .reid-orb__halo { animation: orb-pulse-b 2.3s ease-in-out infinite; }
+.reid-orb[data-orb-state="speaking"] .reid-orb__atmosphere { animation: orb-pulse-c 1.9s ease-in-out infinite; }
+@keyframes orb-pulse-a {
+  0%   { transform: scale(1); opacity: 0.92; }
+  28%  { transform: scale(1.07); opacity: 1; }
+  55%  { transform: scale(1.02); opacity: 0.96; }
+  78%  { transform: scale(1.09); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.92; }
+}
+@keyframes orb-pulse-b {
+  0%   { transform: scale(1.01); opacity: 0.9; }
+  40%  { transform: scale(1.05); opacity: 1; }
+  70%  { transform: scale(0.99); opacity: 0.94; }
+  100% { transform: scale(1.01); opacity: 0.9; }
+}
+@keyframes orb-pulse-c {
+  0%   { transform: scale(1); opacity: 0.85; }
+  50%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.85; }
+}
+
+/* ERROR — go quiet: no pulse, dimmed and still core, faint cool desaturation
+   so it reads "stopped" without needing copy (copy/affordance is 2c). */
+.reid-orb[data-orb-state="error"] { animation: none; transform: scale(0.97); }
+.reid-orb[data-orb-state="error"] .reid-orb__core,
+.reid-orb[data-orb-state="error"] .reid-orb__halo,
+.reid-orb[data-orb-state="error"] .reid-orb__atmosphere,
+.reid-orb[data-orb-state="error"] .reid-orb__highlight {
+  animation: none;
+  opacity: 0.45;
+  filter: saturate(0.6) brightness(0.8);
+}
+
+/* ---- reduced motion: no movement; speaking still distinguishable ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .reid-orb,
+  .reid-orb__layer,
+  .reid-orb__core,
+  .reid-orb__halo,
+  .reid-orb__atmosphere,
+  .reid-orb__highlight {
+    animation: none !important;
+    transform: none !important;
+  }
+  /* Speaking must read as UNMISTAKABLY different from idle without motion:
+     a clear brightness step AND a static (non-animated) size bump. A fixed
+     scale is size, not movement, so it's allowed under reduced-motion and
+     gives a perceptible "fuller" orb a brightness delta alone can't. The
+     higher specificity (data-attr + child) beats the universal
+     `transform: none !important` reset above. */
+  .reid-orb[data-orb-state="speaking"] .reid-orb__core {
+    filter: brightness(1.32) !important;
+    transform: scale(1.08) !important;
+    opacity: 1;
+  }
+  .reid-orb[data-orb-state="speaking"] .reid-orb__halo {
+    transform: scale(1.06) !important;
+    opacity: 1;
+  }
+  .reid-orb[data-orb-state="speaking"] .reid-orb__atmosphere { opacity: 1; }
+  .reid-orb[data-orb-state="thinking"] .reid-orb__highlight { opacity: 1; }
+  .reid-orb[data-orb-state="error"] .reid-orb__core { opacity: 0.45; filter: saturate(0.6) brightness(0.8); }
+}

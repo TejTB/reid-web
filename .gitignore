@@ -43,3 +43,6 @@ next-env.d.ts
 # Local Netlify folder
 .netlify
 .env*.local
+
+# Playwright MCP scratch (screenshots, console/page dumps) — never commit
+.playwright-mcp/
