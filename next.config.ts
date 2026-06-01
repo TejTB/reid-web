@@ -11,6 +11,10 @@ const cspDirectives = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https://*.supabase.co",
+  // Voice playback decodes TTS audio via Web Audio (no media element), but
+  // keep media-src permissive for blob:/data: so any audio/video source is
+  // allowed rather than falling back to default-src 'self' (which refuses it).
+  "media-src 'self' blob: data:",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.anthropic.com https://exp.host https://api.elevenlabs.io",
   "frame-ancestors 'none'",
   "base-uri 'self'",
