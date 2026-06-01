@@ -32,7 +32,11 @@ import {
   type VoiceError,
   type VoiceLoopState,
 } from "@/lib/voice-loop-fsm";
-import { fetchAndPlay, type TtsPlaybackHandle } from "@/lib/voice";
+import {
+  fetchAndPlay,
+  unlockAudioContext,
+  type TtsPlaybackHandle,
+} from "@/lib/voice";
 
 /** Outcome of running one Reid chat turn for a transcript. The caller wires
  *  this to the chat page's existing send/stream pipeline so we never build a
@@ -180,10 +184,10 @@ export function useVoiceLoop(opts: UseVoiceLoopOptions): UseVoiceLoopReturn {
         sessionId: getSessionId() ?? undefined,
         signal: ac.signal,
         onPlay: () => {
-          // Truthful onset: flip to `speaking` only when the audio element is
-          // actually rendering sound (the `playing` event), NOT when we kicked
-          // off the fetch. `thinking` covers TTS fetch/decode latency, so the
-          // orb's pulse never starts during silence on buffered TTS.
+          // Truthful onset: flip to `speaking` only when Web Audio actually
+          // starts output (right after decode + source.start()), NOT when we
+          // kicked off the fetch. `thinking` covers TTS fetch/decode latency,
+          // so the orb's pulse never starts during silence on buffered TTS.
           if (ttsAbortRef.current !== ac) return;
           dispatch({ type: "REPLY_READY" });
         },
@@ -363,15 +367,11 @@ export function useVoiceLoop(opts: UseVoiceLoopOptions): UseVoiceLoopReturn {
       dispatch({ type: "ERROR", kind: "unsupported" });
       return;
     }
-    // iOS Safari: unlock audio on this user gesture so later .play() works.
-    // A muted 0-length play primes the audio pipeline.
-    try {
-      const a = new Audio();
-      a.muted = true;
-      void a.play().catch(() => {});
-    } catch {
-      // non-fatal
-    }
+    // iOS Safari: unlock the shared AudioContext on this user gesture so the
+    // Web Audio playback later in the turn can start. iOS creates the context
+    // suspended and only honours resume() from inside a gesture; this is the
+    // PRIMARY unlock (fetchAndPlay also resumes defensively before each decode).
+    unlockAudioContext();
     dispatch({ type: "START" });
   }, [isSupported]);
 

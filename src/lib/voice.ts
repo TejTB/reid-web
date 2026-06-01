@@ -11,6 +11,66 @@
 
 import { supabase } from "@/lib/supabase";
 
+// ----- Web Audio playback ---------------------------------------------------
+//
+// iOS Safari cannot load blob: URLs into <audio>/<video> media elements
+// (WebKitBlobResource error 1), so TTS is decoded and played through Web Audio
+// instead: arrayBuffer → decodeAudioData → AudioBufferSourceNode. A single
+// AudioContext is created once and reused for every turn. iOS starts it
+// suspended and may suspend/interrupt it again between turns, so it is resumed
+// from the tap-to-speak gesture (unlockAudioContext) AND defensively before
+// each decode.
+
+type AudioContextCtor = typeof AudioContext;
+
+let audioCtx: AudioContext | null = null;
+
+/** Lazily creates (and returns) the shared AudioContext, or null when Web
+ *  Audio is unavailable / on the server. Uses the webkit-prefixed constructor
+ *  on older Safari. */
+function getAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  if (audioCtx) return audioCtx;
+  const Ctor: AudioContextCtor | undefined =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: AudioContextCtor })
+      .webkitAudioContext;
+  if (!Ctor) return null;
+  try {
+    audioCtx = new Ctor();
+  } catch {
+    return null;
+  }
+  return audioCtx;
+}
+
+/** Resumes the shared AudioContext. MUST be called from a user gesture (the
+ *  tap-to-speak handler) — iOS creates the context suspended and only honours
+ *  resume() inside a gesture. Safe to call repeatedly. */
+export function unlockAudioContext(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  // "running" → nothing to do. "suspended"/"interrupted" (iOS) → resume.
+  if (ctx.state !== "running") {
+    void ctx.resume().catch(() => {
+      // Non-fatal — playback will retry the resume before decode.
+    });
+  }
+}
+
+/** Decodes encoded audio into an AudioBuffer. Uses the callback form, which is
+ *  supported on every Safari (incl. older iOS) where the promise form may not
+ *  be. NOTE: decodeAudioData DETACHES the input ArrayBuffer — never reuse the
+ *  buffer after calling this; a retry must re-fetch fresh bytes. */
+function decodeAudio(
+  ctx: AudioContext,
+  data: ArrayBuffer,
+): Promise<AudioBuffer> {
+  return new Promise((resolve, reject) => {
+    ctx.decodeAudioData(data, resolve, reject);
+  });
+}
+
 const VOICE_PREF_KEY = "reid_voice_enabled";
 // Same-tab notification channel: localStorage 'storage' events only fire in
 // OTHER tabs, so we dispatch a plain CustomEvent for the current tab's
@@ -69,13 +129,9 @@ export type TtsResult =
   | { ok: false; reason: "aborted" | "forbidden" | "error" };
 
 export interface TtsPlaybackHandle {
-  /** Stop playback and free the audio element/blob. Safe to call multiple
-   *  times. Does not invoke onEnded — the caller controls UI state when it
-   *  calls stop() itself. */
+  /** Stop playback. Safe to call multiple times. Does NOT invoke onEnded —
+   *  the caller controls UI state when it calls stop() itself. */
   stop(): void;
-  /** The underlying audio element. Exposed so the caller can read .paused
-   *  if needed; do not mutate. */
-  audio: HTMLAudioElement;
 }
 
 interface FetchAndPlayOptions {
@@ -144,54 +200,85 @@ export async function fetchAndPlay(
     return { result: { ok: false, reason: "error" }, handle: null };
   }
 
-  let blob: Blob;
+  // Read the whole response as bytes. decodeAudioData will DETACH this buffer,
+  // so it is used exactly once — a decode failure returns an error rather than
+  // re-decoding the (now-detached) buffer; a retry would have to re-fetch.
+  let bytes: ArrayBuffer;
   try {
-    blob = await res.blob();
+    bytes = await res.arrayBuffer();
   } catch {
     return { result: { ok: false, reason: "error" }, handle: null };
   }
 
-  const url = URL.createObjectURL(blob);
-  const audio = new Audio(url);
-  let cleanedUp = false;
-  const cleanup = () => {
-    if (cleanedUp) return;
-    cleanedUp = true;
-    URL.revokeObjectURL(url);
+  const ctx = getAudioContext();
+  if (!ctx) {
+    return { result: { ok: false, reason: "error" }, handle: null };
+  }
+
+  // Per-turn insurance: iOS can suspend ("suspended") or interrupt
+  // ("interrupted") the context between turns even after the gesture unlock in
+  // start(). Resume before decoding so playback never starts against a dead
+  // context. The gesture-unlock stays the PRIMARY unlock; this is the backstop.
+  if (ctx.state !== "running") {
+    try {
+      await ctx.resume();
+    } catch {
+      // If it won't resume, decode/start below surfaces the real failure.
+    }
+  }
+
+  let audioBuffer: AudioBuffer;
+  try {
+    audioBuffer = await decodeAudio(ctx, bytes);
+  } catch {
+    return { result: { ok: false, reason: "error" }, handle: null };
+  }
+
+  // Per-PLAYBACK flag (local, not module state) so a previous turn's stop()
+  // can never suppress THIS turn's natural-end onended — which would hang the
+  // FSM waiting for PLAYBACK_ENDED.
+  let stoppedByUser = false;
+
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(ctx.destination);
+  source.onended = () => {
+    // onended fires for BOTH natural end and source.stop(); suppress it on a
+    // user stop so onEnded() runs only on a genuine finish.
+    if (stoppedByUser) return;
+    onEnded();
   };
 
-  audio.addEventListener("ended", () => {
-    cleanup();
-    onEnded();
-  });
-  audio.addEventListener("error", () => {
-    cleanup();
-    onEnded();
-  });
-  if (onPlay) {
-    // `playing` (not `play`): fires when audio is actually rendering sound,
-    // after any buffer/decode — so callers that key UI off playback onset
-    // (e.g. the voice orb's speaking pulse) stay truthful with no silent gap.
-    audio.addEventListener("playing", onPlay, { once: true });
-  }
-
   try {
-    await audio.play();
+    source.start();
   } catch {
-    cleanup();
+    try {
+      source.disconnect();
+    } catch {
+      // already detached
+    }
     return { result: { ok: false, reason: "error" }, handle: null };
   }
 
+  // Truthful onset: Web Audio has no `playing` event, but start() begins output
+  // immediately now that decode is done — so the orb's speaking pulse still
+  // fires on real sound, not during fetch/decode latency.
+  onPlay?.();
+
   const handle: TtsPlaybackHandle = {
-    audio,
     stop() {
+      if (stoppedByUser) return;
+      stoppedByUser = true;
       try {
-        audio.pause();
-        audio.currentTime = 0;
+        source.stop();
       } catch {
-        // Ignore — element may already be torn down.
+        // already stopped/ended
       }
-      cleanup();
+      try {
+        source.disconnect();
+      } catch {
+        // already detached
+      }
     },
   };
 
