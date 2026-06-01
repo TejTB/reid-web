@@ -92,7 +92,7 @@ export default function ReidOrb({
             pointerEvents: "none",
           }}
         >
-          <BorderTrail />
+          <BorderTrail color="#8E1616" blur={0} />
         </span>
       )}
     </div>

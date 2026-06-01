@@ -3,16 +3,16 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Mic } from "lucide-react";
 import ChatStream from "@/components/ChatStream";
 import LogoMark from "@/components/LogoMark";
+import ReidOrb from "@/components/ReidOrb";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
 import { streamReid, DailyLimitError, SessionLimitError } from "@/lib/reid";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
 import { FREE_SESSIONS } from "@/lib/session-shared";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
-import { fetchAndPlay, type TtsPlaybackHandle } from "@/lib/voice";
-import { cn } from "@/lib/utils";
+import { useVoiceLoop, type ReidTurnOutcome } from "@/lib/useVoiceLoop";
+import { supabase } from "@/lib/supabase";
 import { PromptInputBox } from "@/components/ui/prompt-input-box";
 import { GlowCard } from "@/components/ui/glow-card";
 import { ShiningText } from "@/components/ui/shining-text";
@@ -61,86 +61,30 @@ const ACTION_CONFIG: Record<
   },
 };
 
-type VoiceState = "idle" | "listening" | "thinking" | "speaking";
+// Voice-orb status → short caption beneath the orb. Error rows are keyed by
+// the FSM error kind (voice.state.error) so each failure reads specifically;
+// the live FSM status covers the rest.
+const VOICE_CAPTION: Record<string, string> = {
+  idle: "Tap to speak",
+  recording: "Listening…",
+  transcribing: "Got it…",
+  speaking: "Reid is speaking",
+  "mic-denied": "Mic access blocked",
+  "no-mic": "No microphone found",
+  unsupported: "Voice isn't supported here",
+  network: "Something glitched — tap to retry",
+  api: "Something glitched — tap to retry",
+};
 
-// SpeechRecognition is a vendor-prefixed web API with no widely-shipped TS
-// lib. Narrow the bits we touch so the rest of the file stays type-safe.
-interface SpeechRecognitionResultPiece {
-  transcript: string;
-}
-interface SpeechRecognitionResultRow {
-  0: SpeechRecognitionResultPiece;
-  isFinal: boolean;
-}
-interface SpeechRecognitionEventLike {
-  results: ArrayLike<SpeechRecognitionResultRow>;
-}
-interface SpeechRecognitionLike {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
-  onerror: (() => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-}
-type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
-
-function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: SpeechRecognitionCtor;
-    webkitSpeechRecognition?: SpeechRecognitionCtor;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
-
-// ---- Voice-mode inline visuals --------------------------------------------
-// ListeningBars / SpeakingBars are tiny equaliser-style indicators. They live
-// here (not in a shared file) because they're only used by the voice mode
-// surface on this page.
-function ListeningBars() {
-  return (
-    <div className="flex items-end gap-1 h-6" aria-hidden>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <motion.span
-          key={i}
-          className="w-1 rounded-full bg-white/70"
-          initial={{ height: 6 }}
-          animate={{ height: [6, 22, 10, 18, 8] }}
-          transition={{
-            repeat: Infinity,
-            duration: 0.9,
-            ease: "easeInOut",
-            delay: i * 0.08,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function SpeakingBars() {
-  return (
-    <div className="flex items-end gap-1 h-6" aria-hidden>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <motion.span
-          key={i}
-          className="w-1 rounded-full bg-[#B91C1C]"
-          initial={{ height: 4 }}
-          animate={{ height: [4, 18, 8, 22, 6] }}
-          transition={{
-            repeat: Infinity,
-            duration: 0.7,
-            ease: "easeInOut",
-            delay: i * 0.06,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
+// Accessible action label for the orb button, by FSM status.
+const ORB_TAP_LABEL: Record<string, string> = {
+  idle: "Tap to speak",
+  recording: "Stop recording",
+  transcribing: "Processing",
+  thinking: "Reid is thinking",
+  speaking: "Stop playback",
+  error: "Retry voice",
+};
 
 // ---- File -> base64 data URL ----------------------------------------------
 // Used by handleSend when the PromptInputBox attached one or more images.
@@ -216,24 +160,22 @@ function ChatPageInner() {
   // 20-message cap), we store the ended session's id so the recap overlay
   // can fetch its title/note. Cleared when the overlay closes / navigates.
   const [endedSessionId, setEndedSessionId] = useState<string | null>(null);
-  // Voice-mode UI state. The toggle only renders when SpeechRecognition is
-  // available; `voiceState` drives the bars / mic indicator.
-  const [speechSupported] = useState<boolean>(() => getSpeechRecognitionCtor() !== null);
+  // Voice-mode UI state. `voiceMode` is the surface switch (text composer ↔
+  // voice orb); the turn-based loop itself lives in useVoiceLoop, whose FSM
+  // status drives every in-surface visual (the orb). No SpeechRecognition.
   const [voiceMode, setVoiceMode] = useState(false);
-  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const ttsHandleRef = useRef<TtsPlaybackHandle | null>(null);
-  const ttsAbortRef = useRef<AbortController | null>(null);
-  // True when the next finalised assistant message should be auto-spoken
-  // because the user just submitted via voice. Cleared once playback starts.
-  const speakNextRef = useRef(false);
   const initialized = useRef(false);
 
   const streamWithRetry = useCallback(
     async (
       currentSessionId: string | null,
       msgs: Message[],
-    ): Promise<{ ok: boolean; text: string; sessionId: string | null }> => {
+    ): Promise<{
+      ok: boolean;
+      text: string;
+      sessionId: string | null;
+      walled: boolean;
+    }> => {
       let acc = "";
       let resolvedSessionId: string | null = currentSessionId;
       const onSession = (sid: string) => {
@@ -257,7 +199,7 @@ function ChatPageInner() {
           acc += chunk;
           setStreamingText(acc);
         }
-        return { ok: true, text: acc, sessionId: resolvedSessionId };
+        return { ok: true, text: acc, sessionId: resolvedSessionId, walled: false };
       } catch (err) {
         // Paywall (402): session_limit_reached opens the upgrade modal and
         // rolls back the optimistic user turn. No retry — the free quota is
@@ -270,6 +212,7 @@ function ChatPageInner() {
             ok: false,
             text: "",
             sessionId: resolvedSessionId,
+            walled: true,
           };
         }
         // Paywall: 429 daily_limit_exceeded opens the upgrade modal and
@@ -283,6 +226,7 @@ function ChatPageInner() {
             ok: false,
             text: "",
             sessionId: resolvedSessionId,
+            walled: true,
           };
         }
         setMessages((prev) => [
@@ -304,15 +248,15 @@ function ChatPageInner() {
             acc += chunk;
             setStreamingText(acc);
           }
-          return { ok: true, text: acc, sessionId: resolvedSessionId };
+          return { ok: true, text: acc, sessionId: resolvedSessionId, walled: false };
         } catch (retryErr) {
-          if (
+          const walled =
             retryErr instanceof DailyLimitError ||
-            retryErr instanceof SessionLimitError
-          ) {
+            retryErr instanceof SessionLimitError;
+          if (walled) {
             openPaywall("session_limit");
           }
-          return { ok: false, text: "", sessionId: resolvedSessionId };
+          return { ok: false, text: "", sessionId: resolvedSessionId, walled };
         }
       }
     },
@@ -443,8 +387,12 @@ function ChatPageInner() {
   // effect's deps are `[]` so it ONLY runs on mount/unmount.
   const sessionIdRef = useRef<string | null>(null);
   const hasAssistantMessageRef = useRef<boolean>(false);
+  // Latest messages, read by runReidTurn (voice loop) so it appends to current
+  // state with no stale closure — mirrors streamWithRetry's stateless design.
+  const messagesRef = useRef<Message[]>(messages);
   useEffect(() => {
     sessionIdRef.current = sessionId;
+    messagesRef.current = messages;
     hasAssistantMessageRef.current = messages.some(
       (m) => m.role === "assistant",
     );
@@ -508,10 +456,14 @@ function ChatPageInner() {
     }
 
     if (!result.ok) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "My end's jammed. Send it again." },
-      ]);
+      // On a wall (402/429) streamWithRetry already rolled back the optimistic
+      // turn and opened the paywall — don't also append a generic error bubble.
+      if (!result.walled) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "My end's jammed. Send it again." },
+        ]);
+      }
       setStreamingText("");
       setIsStreaming(false);
       return;
@@ -524,195 +476,94 @@ function ChatPageInner() {
     setIsStreaming(false);
   }
 
-  // ---- Voice mode handlers ------------------------------------------------
-  // The mic toggle starts a one-shot SpeechRecognition session, transcribes
-  // the user's speech, and routes the transcript through handleSend. For Pro
-  // users in voice mode we then auto-play Reid's reply via fetchAndPlay.
+  // ---- Voice mode: the turn-based loop ------------------------------------
+  // useVoiceLoop owns mic capture, /api/transcribe, the Reid turn, and TTS
+  // playback, driven by the voice FSM. The chat page only injects the turn
+  // runner (reusing the existing /api/reid pipeline — never a second one), a
+  // live session-id getter, and an access-token getter; it consumes the FSM
+  // status to drive the orb. Replaces the old in-browser SpeechRecognition
+  // path, which was unreliable on iOS Safari.
 
-  // Stop any active recognition / TTS when voice mode is dismissed. State
-  // reset (voiceState → idle, speakNextRef) is performed inline by the
-  // dismissal handler below so the effect body stays focused on external
-  // system teardown — no setState inside an effect body.
-  useEffect(() => {
-    if (voiceMode) return;
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {
-        // ignore
+  // Runs ONE Reid turn for a voice transcript through the SAME send/stream
+  // pipeline as text mode and reports the outcome back to the FSM. Reads the
+  // latest messages / session id via refs so there's no stale closure.
+  const runReidTurn = useCallback(
+    async (transcript: string): Promise<ReidTurnOutcome> => {
+      const userMessage: Message = { role: "user", content: transcript };
+      const nextMessages: Message[] = [...messagesRef.current, userMessage];
+      setMessages(nextMessages);
+      setPendingActions([]);
+      setIsStreaming(true);
+      setStreamingText("");
+      const result = await streamWithRetry(sessionIdRef.current, nextMessages);
+      if (result.sessionId && result.sessionId !== sessionIdRef.current) {
+        setSessionId(result.sessionId);
+        setChatSessionId(result.sessionId);
       }
-      recognitionRef.current = null;
+      setStreamingText("");
+      setIsStreaming(false);
+      // Wall (reid 402 / daily 429): streamWithRetry already rolled back the
+      // optimistic turn and opened the paywall — the FSM just unwinds to idle.
+      if (result.walled) return { replyText: "", walled: true, failed: false };
+      // Non-paywall failure → drives the orb's error state.
+      if (!result.ok) return { replyText: "", walled: false, failed: true };
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: result.text },
+      ]);
+      return { replyText: result.text, walled: false, failed: false };
+    },
+    [streamWithRetry],
+  );
+
+  // Supabase access token for authing the /api/transcribe POST (mirrors the
+  // bearer attach in fetchAndPlay). Null when there's no session.
+  const getAccessToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      return session?.access_token ?? null;
+    } catch {
+      return null;
     }
-    if (ttsAbortRef.current) {
-      ttsAbortRef.current.abort();
-      ttsAbortRef.current = null;
-    }
-    if (ttsHandleRef.current) {
-      ttsHandleRef.current.stop();
-      ttsHandleRef.current = null;
-    }
-  }, [voiceMode]);
+  }, []);
+
+  const voice = useVoiceLoop({
+    runReidTurn,
+    getSessionId: () => sessionIdRef.current,
+    getAccessToken,
+  });
+
+  // Hard-reset the loop whenever voice mode is dismissed (also covers leaving
+  // /chat — useVoiceLoop runs its own unmount teardown). cancel() aborts any
+  // capture / playback / fetch and returns the FSM to idle; a no-op when idle.
+  const voiceCancel = voice.cancel;
+  useEffect(() => {
+    if (!voiceMode) voiceCancel();
+  }, [voiceMode, voiceCancel]);
 
   const exitVoiceMode = useCallback(() => {
-    speakNextRef.current = false;
-    setVoiceState("idle");
     setVoiceMode(false);
   }, []);
 
-  // Final unmount tear-down (covers leaving /chat while voice mode is on).
-  useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
-      }
-      if (ttsAbortRef.current) ttsAbortRef.current.abort();
-      if (ttsHandleRef.current) ttsHandleRef.current.stop();
-    };
-  }, []);
-
-  const handleVoiceTap = useCallback(() => {
-    if (!voiceMode) return;
-    // Tapping while speaking stops playback and returns to idle.
-    if (voiceState === "speaking") {
-      if (ttsHandleRef.current) {
-        ttsHandleRef.current.stop();
-        ttsHandleRef.current = null;
-      }
-      if (ttsAbortRef.current) {
-        ttsAbortRef.current.abort();
-        ttsAbortRef.current = null;
-      }
-      setVoiceState("idle");
-      return;
+  // The orb IS the control. Tap semantics by FSM status: idle → start a turn;
+  // recording → stop capture early; speaking → cancel playback (→ idle);
+  // recoverable error → retry (the FSM maps START from a recoverable error
+  // back to recording). transcribing / thinking are busy and the button is
+  // disabled, so those taps never reach here; 'unsupported' is terminal.
+  const voiceStatus = voice.state.status;
+  const onOrbTap = useCallback(() => {
+    if (voiceStatus === "idle") {
+      voice.start();
+    } else if (voiceStatus === "recording") {
+      voice.stopRecording();
+    } else if (voiceStatus === "speaking") {
+      voice.cancel();
+    } else if (voiceStatus === "error" && voice.state.error !== "unsupported") {
+      voice.start();
     }
-    // Tapping while listening aborts the current recognition attempt.
-    if (voiceState === "listening") {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
-        recognitionRef.current = null;
-      }
-      setVoiceState("idle");
-      return;
-    }
-    // Idle → start a fresh recognition session.
-    if (voiceState !== "idle") return;
-    if (isStreaming) return;
-    const Ctor = getSpeechRecognitionCtor();
-    if (!Ctor) return;
-    const rec = new Ctor();
-    rec.lang = "en-GB";
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.onresult = (e) => {
-      let transcript = "";
-      for (let i = 0; i < e.results.length; i++) {
-        const row = e.results[i];
-        if (row.isFinal) transcript += row[0].transcript;
-      }
-      transcript = transcript.trim();
-      if (!transcript) return;
-      // Mark the next assistant message as one to auto-speak, flip to
-      // thinking state, and dispatch through the normal chat pipeline.
-      speakNextRef.current = true;
-      setVoiceState("thinking");
-      void handleSend(transcript);
-    };
-    rec.onerror = () => {
-      setVoiceState("idle");
-      recognitionRef.current = null;
-    };
-    rec.onend = () => {
-      // If no result fired we'll be left in "listening" — drop back to idle.
-      // If a result did fire, voiceState is already "thinking".
-      setVoiceState((prev) => (prev === "listening" ? "idle" : prev));
-      recognitionRef.current = null;
-    };
-    recognitionRef.current = rec;
-    setVoiceState("listening");
-    try {
-      rec.start();
-    } catch {
-      // start() can throw if mic permission is denied or already started.
-      setVoiceState("idle");
-      recognitionRef.current = null;
-    }
-    // handleSend is stable enough for our purposes — it reads the latest
-    // messages from state via setMessages closures internally.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceMode, voiceState, isStreaming]);
-
-  // After a streamed turn finishes in voice mode for a Pro user, auto-play
-  // the assistant message via /api/tts. Free users in voice mode get the
-  // thinking → idle transition without playback — voice playback is gated
-  // on Pro everywhere in /chat.
-  const latestAssistantContent = (() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "assistant") return messages[i].content;
-    }
-    return "";
-  })();
-  useEffect(() => {
-    if (!voiceMode) return;
-    if (isStreaming) return;
-    if (!speakNextRef.current) return;
-    if (!latestAssistantContent) return;
-    speakNextRef.current = false;
-
-    // Branch async so React doesn't see a setState in the synchronous effect
-    // body — the rule wants subscribe-then-callback patterns. The microtask
-    // / fetchAndPlay continuations satisfy that.
-    let cancelled = false;
-    const ac = new AbortController();
-    ttsAbortRef.current = ac;
-
-    void (async () => {
-      if (!isPro) {
-        // Free users can't auto-play in voice mode — drop to idle so the user
-        // can tap to speak again.
-        if (cancelled) return;
-        setVoiceState("idle");
-        ttsAbortRef.current = null;
-        return;
-      }
-      setVoiceState("speaking");
-      const { result, handle } = await fetchAndPlay({
-        text: latestAssistantContent,
-        preview: false,
-        // Exclude the current session from the entitlement count so it can't
-        // wall itself (Sprint 12 self-count fix). Pro bypasses the count, so
-        // this is a no-op for today's Pro-only auto-play path, but it
-        // establishes the correct seam for the Build 2 free-voice loop.
-        sessionId: sessionIdRef.current ?? undefined,
-        signal: ac.signal,
-        onEnded: () => {
-          if (ttsAbortRef.current !== ac) return;
-          ttsAbortRef.current = null;
-          ttsHandleRef.current = null;
-          setVoiceState("idle");
-        },
-      });
-      if (cancelled) return;
-      if (result.ok && handle) {
-        ttsHandleRef.current = handle;
-      } else {
-        ttsAbortRef.current = null;
-        ttsHandleRef.current = null;
-        setVoiceState("idle");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [voiceMode, isStreaming, latestAssistantContent, isPro]);
+  }, [voice, voiceStatus]);
 
   const subtitle = lastSessionAt
     ? `Last session: ${formatLastSession(lastSessionAt)}`
@@ -993,81 +844,45 @@ function ChatPageInner() {
                   exit={{ opacity: 0, y: 20 }}
                   className="flex flex-col items-center justify-center pb-2 pt-2 gap-6"
                 >
-                  <AnimatePresence mode="wait">
-                    {voiceState === "speaking" ? (
-                      <motion.div
-                        key="reid-speaking"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="flex items-center gap-3"
-                      >
-                        <SpeakingBars />
-                        <span className="text-white/60 text-xs font-sans">
-                          Reid is speaking
-                        </span>
-                      </motion.div>
-                    ) : voiceState === "thinking" ? (
-                      <motion.div
-                        key="thinking"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="flex items-center gap-2"
-                      >
-                        <span className="inline-block h-2 w-2 rounded-full bg-[#B91C1C] animate-pulse" />
-                        <ShiningText text="thinking." />
-                      </motion.div>
-                    ) : voiceState === "listening" ? (
-                      <motion.div
-                        key="listening"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="flex items-center gap-3"
-                      >
-                        <ListeningBars />
-                        <span className="text-white/60 text-xs font-sans">
-                          Listening...
-                        </span>
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="idle"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="text-white/20 text-xs font-sans"
-                      >
-                        Tap to speak
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  {/* The orb IS the control: a tap target whose visual is the
+                      FSM-driven ReidOrb. Disabled while busy (transcribing /
+                      thinking) and when voice is terminally unsupported. */}
                   <motion.button
                     type="button"
-                    whileTap={{ scale: 0.95 }}
-                    onClick={handleVoiceTap}
-                    disabled={voiceState === "thinking" || isStreaming}
-                    className={cn(
-                      "flex h-16 w-16 items-center justify-center rounded-full border transition-colors",
-                      voiceState === "listening"
-                        ? "border-white/40 bg-white/10 text-white"
-                        : voiceState === "speaking"
-                          ? "border-[#B91C1C]/60 bg-[#B91C1C]/20 text-[#B91C1C]"
-                          : voiceState === "thinking"
-                            ? "border-white/10 bg-white/5 text-white/30"
-                            : "border-white/15 bg-white/5 text-white/60 hover:text-white",
-                    )}
-                    aria-label={
-                      voiceState === "listening"
-                        ? "Stop listening"
-                        : voiceState === "speaking"
-                          ? "Stop playback"
-                          : "Tap to speak"
+                    whileTap={{ scale: 0.96 }}
+                    onClick={onOrbTap}
+                    disabled={
+                      voiceStatus === "transcribing" ||
+                      voiceStatus === "thinking" ||
+                      (voiceStatus === "error" &&
+                        voice.state.error === "unsupported")
                     }
+                    aria-label={ORB_TAP_LABEL[voiceStatus]}
+                    className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#8E1616]/50 disabled:cursor-default"
                   >
-                    <Mic className="h-6 w-6" />
+                    <ReidOrb status={voiceStatus} size={200} />
                   </motion.button>
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={voiceStatus}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="flex min-h-[1.25rem] items-center justify-center"
+                    >
+                      {voiceStatus === "thinking" ? (
+                        <ShiningText text="thinking." />
+                      ) : (
+                        <span className="text-white/50 text-xs font-sans">
+                          {VOICE_CAPTION[
+                            voiceStatus === "error"
+                              ? voice.state.error ?? "api"
+                              : voiceStatus
+                          ]}
+                        </span>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
                   <button
                     type="button"
                     onClick={exitVoiceMode}
@@ -1088,9 +903,9 @@ function ChatPageInner() {
                     isLoading={isStreaming || !loaded}
                     placeholder="What's the situation?"
                     initialValue={prefillFromUrl}
-                    onMicClick={speechSupported ? handleMicClick : undefined}
+                    onMicClick={voice.isSupported ? handleMicClick : undefined}
                     inlineBadge={
-                      !isPro && speechSupported ? (
+                      !isPro && voice.isSupported ? (
                         <ShiningText text="PRO" />
                       ) : undefined
                     }
