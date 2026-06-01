@@ -49,6 +49,16 @@ export interface Session {
   summary: string | null;
   task_set: string | null;
   message_count: number;
+  /** 'chat' counts toward the free-tier quota; 'onboarding' is exempt. The
+   *  column is `text NOT NULL DEFAULT 'chat'` in prod; the app only ever
+   *  writes these two values. */
+  mode: "chat" | "onboarding";
+  /** Concrete commitments the founder made, captured by the summarise-at-
+   *  next-start pass (Sprint 12 Build B). jsonb in prod; we write a string[]. */
+  commitments: string[] | null;
+  /** A few facts worth remembering next session, captured alongside the
+   *  summary. jsonb in prod; we write a string[]. */
+  key_points: string[] | null;
   /** Set by /api/session-recap once the session has ended. 3-6 word title. */
   title: string | null;
   /** One-sentence Reid voice line written into the recap. */

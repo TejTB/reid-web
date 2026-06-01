@@ -25,6 +25,9 @@
 // `summary`/`task` are the canonical fields going forward.
 // `heard`/`opportunity` are populated only when the legacy block is detected.
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { getMessagesForSession } from "./session-server.ts";
+
 export const ONBOARDING_SENTINEL = "[ONBOARDING_COMPLETE]";
 
 export type OnboardingClose = {
@@ -198,4 +201,151 @@ export function extractName(input: string | Array<{ role: string; content: strin
     // and was the root cause of the "Good afternoon, Building." bug.
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Session summarisation (Sprint 12 Build B).
+//
+// Session summaries used to be written ONLY when the model emitted
+// [SESSION_COMPLETE], which it almost never did — so `sessions.summary` was
+// 0/159 non-null in prod and the next-session recap had nothing to read. The
+// fix is to summarise the founder's most recent prior CHAT session lazily, at
+// the START of their next session, before building that session's context.
+//
+// The generation runs on a Haiku-class model (one-shot JSON extraction, not
+// dialogue) and ALWAYS writes a non-null summary — a minimal fallback string
+// on model/parse failure. That non-null write is the idempotency mechanism:
+// `qualifiesForSummary` gates on `summary IS NULL`, so a session is summarised
+// at most once and never re-attempted. `outcome_captured` is deliberately left
+// alone — it keeps its existing "productive session" meaning.
+// ---------------------------------------------------------------------------
+
+export interface SessionSummaryResult {
+  /** One honest sentence. Never empty — falls back to SUMMARY_FALLBACK. */
+  summary: string;
+  /** Concrete things the founder said they'd do. Capped, may be empty. */
+  commitments: string[];
+  /** A few facts worth remembering next session. Capped, may be empty. */
+  key_points: string[];
+}
+
+/** Written when the model call or its JSON output can't yield a real summary.
+ *  Non-null on purpose: it marks the session as processed so the summariser
+ *  never retries it (and never taxes time-to-first-token again). */
+const SUMMARY_FALLBACK = "Session recorded — no summary could be generated.";
+
+const SUMMARY_SYSTEM = `You are summarising one coaching session between Reid (a blunt, honest co-founder/advisor) and a founder, so Reid can pick the thread back up next time.
+
+Return ONLY a JSON object — no prose, no markdown fences, no commentary. Exactly these keys:
+  "summary": one honest sentence describing what actually happened this session. No flattery. Concrete.
+  "commitments": array of short strings — specific things the founder said they would DO before next time. Empty array if none.
+  "key_points": array of short strings — the few facts worth remembering next session (what they're building, a blocker, a person, a deadline). Empty array if none.
+
+Keep each array to at most 5 items. Each item one short clause. If the transcript is too thin to summarise, still return the JSON with a best-effort summary and empty arrays.`;
+
+/** Coerces an unknown value into a clean, capped string array. */
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0)
+    .slice(0, 5);
+}
+
+/** Parses the model's raw output into a SessionSummaryResult. Tolerant of
+ *  ```json fences and of non-JSON output: malformed JSON degrades to using the
+ *  raw text as the summary (capped), or SUMMARY_FALLBACK when there's nothing
+ *  usable. Pure + exported so the gating/parse logic is unit-testable without
+ *  touching the network. */
+export function parseSummaryJson(raw: string): SessionSummaryResult {
+  const cleaned = raw
+    .replace(/^\s*```(?:json)?/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+  try {
+    const obj = JSON.parse(cleaned) as Record<string, unknown>;
+    const summary =
+      typeof obj.summary === "string" && obj.summary.trim().length > 0
+        ? obj.summary.trim()
+        : SUMMARY_FALLBACK;
+    return {
+      summary,
+      commitments: toStringArray(obj.commitments),
+      key_points: toStringArray(obj.key_points),
+    };
+  } catch {
+    // Not JSON. If the model returned plain prose, use it as the summary so we
+    // still capture *something*; otherwise fall back. Arrays stay empty.
+    const summary = cleaned.length > 0 ? cleaned.slice(0, 280) : SUMMARY_FALLBACK;
+    return { summary, commitments: [], key_points: [] };
+  }
+}
+
+/** Generates a structured summary from a session's transcript via a Haiku-
+ *  class model. Never throws and never returns an empty summary — model or
+ *  parse failures degrade to SUMMARY_FALLBACK. The Anthropic client is
+ *  imported lazily so this module stays side-effect-free at load (the pure
+ *  helpers above can be imported in tests without an API key). */
+export async function generateSessionSummary(
+  messages: { role: "user" | "assistant"; content: string }[],
+): Promise<SessionSummaryResult> {
+  if (messages.length === 0) {
+    return { summary: SUMMARY_FALLBACK, commitments: [], key_points: [] };
+  }
+  const transcript = messages
+    .map((m) => `${m.role === "user" ? "Founder" : "Reid"}: ${m.content}`)
+    .join("\n");
+
+  try {
+    const { anthropic, REID_SUMMARY_MODEL } = await import("./anthropic.ts");
+    const msg = await anthropic.messages.create({
+      model: REID_SUMMARY_MODEL,
+      max_tokens: 512,
+      system: SUMMARY_SYSTEM,
+      messages: [{ role: "user", content: transcript }],
+    });
+    const raw = msg.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("")
+      .trim();
+    return parseSummaryJson(raw);
+  } catch {
+    return { summary: SUMMARY_FALLBACK, commitments: [], key_points: [] };
+  }
+}
+
+/** Decides whether a prior session should be summarised at next-session start.
+ *  The condition: it has never been summarised AND it has real substance.
+ *  `mode === 'chat'` is enforced by the caller's query (only chat sessions are
+ *  summarised into `sessions.summary`; onboarding has its own
+ *  `users.onboarding_summary`). Pure + exported for unit testing. */
+export function qualifiesForSummary(session: {
+  summary: string | null;
+  message_count: number;
+}): boolean {
+  return session.summary === null && session.message_count >= 4;
+}
+
+/** Loads a prior session's messages, generates a structured summary, and
+ *  writes `summary` + `commitments` + `key_points` back to the session row.
+ *  Always writes a non-null summary (idempotency). Best-effort: a failed write
+ *  is swallowed by the caller's try/catch. Does NOT touch `outcome_captured`. */
+export async function summarisePriorSession(
+  db: SupabaseClient,
+  userId: string,
+  sessionId: string,
+): Promise<void> {
+  const msgs = await getMessagesForSession(db, userId, sessionId);
+  const result = await generateSessionSummary(
+    msgs.map((m) => ({ role: m.role, content: m.content })),
+  );
+  await db
+    .from("sessions")
+    .update({
+      summary: result.summary,
+      commitments: result.commitments,
+      key_points: result.key_points,
+    })
+    .eq("id", sessionId);
 }

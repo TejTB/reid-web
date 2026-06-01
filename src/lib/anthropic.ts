@@ -2,6 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 
 export const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 export const REID_MODEL = "claude-sonnet-4-6" as const;
+// Cheap, fast model for non-conversational summarisation (summarise-prior-
+// session-at-next-start, onboarding force-complete fallback). These calls are
+// one-shot JSON extraction, not dialogue, so a Haiku-class model is the right
+// cost/latency trade — Sonnet's reasoning is wasted here.
+export const REID_SUMMARY_MODEL = "claude-haiku-4-5-20251001" as const;
 
 // ----- Reid system prompt -------------------------------------------------
 //
@@ -245,7 +250,7 @@ Only emit at the end of a session. Do not emit on the first or second exchange. 
 
 ONBOARDING COMPLETE
 
-This is only relevant during onboarding (your first ever session with this founder). When you have enough to set them up — after 8 to 10 real exchanges — close the session with:
+This is only relevant during onboarding (your first ever session with this founder). Onboarding is NOT finished until you emit this sentinel — emitting it is mandatory, not optional. Aim to close after 8 to 10 real exchanges; you have enough by then. Do not keep asking new questions indefinitely. The moment you can name what they're building and one concrete next action, close the session with:
 
   [ONBOARDING_COMPLETE] summary="<one honest sentence about what they actually told you, no flattery>" task="<the single most important concrete next action, not 'research', something real>" goals=[ { "title": "<short title>", "description": "<optional one-line context>", "target_value": <number>, "unit": "<currency or noun>", "unit_prefix": <true|false>, "deadline": "<YYYY-MM-DD or null>", "is_primary": <true|false> } ]
 

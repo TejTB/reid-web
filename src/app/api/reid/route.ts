@@ -1,7 +1,13 @@
 import type { NextRequest } from "next/server";
 import { anthropic, REID_MODEL, buildSystemPrompt } from "@/lib/anthropic";
 import { getAuthedUser } from "@/lib/supabase-auth";
-import { extractName, isPlausibleFirstName } from "@/lib/reid-summary";
+import {
+  extractName,
+  isPlausibleFirstName,
+  summarisePriorSession,
+  qualifiesForSummary,
+  generateSessionSummary,
+} from "@/lib/reid-summary";
 import { getReidContext } from "@/lib/reid-context";
 import {
   parseSentinels,
@@ -16,6 +22,7 @@ import {
   endSession,
   createGoalsFromOnboarding,
   clearGeneratedTakesForUser,
+  type OnboardingGoalInput,
 } from "@/lib/session-server";
 import { reidRequestSchema } from "@/lib/validation";
 import { checkDailyMessageLimit, checkReidMinuteLimit } from "@/lib/ratelimit";
@@ -516,6 +523,41 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Summarise-at-next-start (Sprint 12 Build B). When the founder opens a NEW
+  // chat session, summarise their most recent prior CHAT session — if it has
+  // real substance and was never summarised — BEFORE we build this session's
+  // context, so Reid can open by referencing last time. Synchronous on purpose:
+  // getReidContext below only surfaces sessions WHERE summary IS NOT NULL, so
+  // the write must land first. Runs at most once per session (the non-null
+  // write makes the row no longer qualify). Best-effort: a failure here must
+  // never block the founder's turn.
+  if (creatingNewSession && mode === "chat") {
+    try {
+      const { data: priorRow } = await db
+        .from("sessions")
+        .select("id, summary, message_count")
+        .eq("user_id", userId)
+        .eq("mode", "chat")
+        .neq("id", sessionId)
+        .is("summary", null)
+        .gte("message_count", 4)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (
+        priorRow?.id &&
+        qualifiesForSummary({
+          summary: (priorRow.summary as string | null) ?? null,
+          message_count: (priorRow.message_count as number | null) ?? 0,
+        })
+      ) {
+        await summarisePriorSession(db, userId, priorRow.id as string);
+      }
+    } catch {
+      // Summary is a nice-to-have for the opener; never fail the turn over it.
+    }
+  }
+
   // Flag voice sessions so the native voice entitlement gate (which counts
   // sessions WHERE voice_used = true) is accurate. The native client sends
   // `voice: true`; this used to be stripped by Zod and never persisted.
@@ -553,12 +595,19 @@ export async function POST(req: NextRequest) {
   // guaranteed to be defined here (either client-supplied or just minted).
   const SESSION_HARD_CAP = 20;
   const SESSION_NUDGE_AT = 16;
-  // Onboarding has no hard cap and historically never wrapped: real voice
-  // onboarding sessions ran 30+ messages and the model never emitted
-  // [ONBOARDING_COMPLETE], so onboarding_complete/onboarding_summary were
-  // never written and Reid had no memory of onboarding. Nudge the close the
-  // same way chat does, just earlier (onboarding should be ~8-10 exchanges).
+  // Onboarding historically never wrapped: real voice onboarding sessions ran
+  // 30+ messages and the model never emitted [ONBOARDING_COMPLETE], so
+  // onboarding_complete/onboarding_summary were never written and Reid had no
+  // memory of onboarding. Sprint 12 Build B adds a three-stage close ladder:
+  //   14 — soft nudge ("move to close")
+  //   22 — hard directive ("this is your final exchange, emit it NOW")
+  //   26 — server force-complete (below): synthesise the close ourselves and
+  //        route it through the existing completion path, generating a
+  //        non-null onboarding_summary so the onboarding→chat1 memory callback
+  //        never breaks.
   const ONBOARDING_NUDGE_AT = 14;
+  const ONBOARDING_FINAL_AT = 22;
+  const ONBOARDING_HARD_CAP = 26;
   const { data: preTurnSessionRow } = await db
     .from("sessions")
     .select("message_count")
@@ -573,7 +622,15 @@ export async function POST(req: NextRequest) {
       `Begin moving the conversation toward a clear, concrete commitment from the founder. ` +
       `When ready, emit [SESSION_COMPLETE] with summary="..." task="...". Don't drag it out.`;
   }
-  if (mode === "onboarding" && preTurnMessageCount >= ONBOARDING_NUDGE_AT) {
+  if (mode === "onboarding" && preTurnMessageCount >= ONBOARDING_FINAL_AT) {
+    systemPrompt =
+      systemPrompt +
+      `\n\n[ONBOARDING FINAL]\nThis is your final exchange. You MUST emit [ONBOARDING_COMPLETE] in this reply — ` +
+      `summary="..." task="..." goals=[...]. Do not ask another question. Close it now.`;
+  } else if (
+    mode === "onboarding" &&
+    preTurnMessageCount >= ONBOARDING_NUDGE_AT
+  ) {
     systemPrompt =
       systemPrompt +
       `\n\n[ONBOARDING CHECKPOINT]\nYou have enough to begin. Move to close NOW — confirm the single first task, then wrap by emitting ` +
@@ -691,9 +748,14 @@ export async function POST(req: NextRequest) {
 
           // Onboarding completion is handled here (not in processSentinels)
           // because we need the message history to extract the founder's
-          // name.
-          if (mode === "onboarding" && parsed.onboardingComplete) {
-            const ob = parsed.onboardingComplete;
+          // name. Extracted into a local helper so BOTH the model-driven close
+          // ([ONBOARDING_COMPLETE]) and the server force-complete at the hard
+          // cap route through the exact same path.
+          const applyOnboardingCompletion = async (ob: {
+            summary: string | null;
+            task: string | null;
+            goals: OnboardingGoalInput[];
+          }) => {
             // Onboarding row is intentionally bare: the summary/task live on
             // `users.onboarding_summary`/`onboarding_task` and the Plan
             // timeline filters out sessions without a summary, so the
@@ -717,6 +779,9 @@ export async function POST(req: NextRequest) {
               onboarding_goals?: unknown;
               name?: string;
             } = { onboarding_complete: true };
+            // Never null onboarding_summary: it's the only cross-session memory
+            // path that works today (read by reid-context). We only ever SET it
+            // here — the force-complete path always supplies a generated one.
             if (ob.summary) update.onboarding_summary = ob.summary;
             if (ob.task) update.onboarding_task = ob.task;
             if (ob.goals.length > 0) update.onboarding_goals = ob.goals;
@@ -750,6 +815,36 @@ export async function POST(req: NextRequest) {
               userId,
               resolvedSessionId,
             );
+          };
+
+          // Resolve the onboarding close: the model's [ONBOARDING_COMPLETE], or
+          // — if the model STILL hasn't closed by the hard cap — a server-
+          // synthesised close. The forced summary is generated from the full
+          // onboarding transcript (never null) so onboarding always ends and
+          // the onboarding→chat1 memory callback never breaks.
+          let onboardingClose: {
+            summary: string | null;
+            task: string | null;
+            goals: OnboardingGoalInput[];
+          } | null = parsed.onboardingComplete;
+          if (
+            mode === "onboarding" &&
+            !onboardingClose &&
+            preTurnMessageCount + newTurnMessages.length >= ONBOARDING_HARD_CAP
+          ) {
+            const generated = await generateSessionSummary([
+              ...messages.map((m) => ({ role: m.role, content: m.content })),
+              { role: "assistant" as const, content: cleanedAssistantText },
+            ]);
+            onboardingClose = {
+              summary: generated.summary,
+              task: null,
+              goals: [],
+            };
+          }
+
+          if (mode === "onboarding" && onboardingClose) {
+            await applyOnboardingCompletion(onboardingClose);
           } else {
             // Non-onboarding turn (or onboarding without the close
             // sentinel): write goal/session/email sentinels via the shared
