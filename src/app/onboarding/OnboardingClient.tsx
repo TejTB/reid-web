@@ -6,8 +6,9 @@ import ChatStream from "@/components/ChatStream";
 import { PromptInputBox } from "@/components/ui/prompt-input-box";
 import OnboardingIntro from "@/components/OnboardingIntro";
 import { useAuth } from "@/components/AuthProvider";
-import { streamReid } from "@/lib/reid";
+import { streamReid, RateLimitError } from "@/lib/reid";
 import { parseOnboardingClose } from "@/lib/reid-summary";
+import RateLimitNotice from "@/components/RateLimitNotice";
 import type { Message } from "@/types/chat";
 
 // Onboarding has three stages:
@@ -57,6 +58,12 @@ export default function OnboardingClient() {
   // 600ms fade-then-go so the founder lands on /home inside one second of
   // Reid's final message.
   const [isCompleting, setIsCompleting] = useState(false);
+  // Per-minute burst 429 notice: the seed to resend + the wait. Null when not
+  // rate-limited. Manual retry only, gated on a countdown — no auto re-entry.
+  const [rateLimitNotice, setRateLimitNotice] = useState<{
+    retryAfter: number;
+    seed: Message[];
+  } | null>(null);
   const completionTriggered = useRef(false);
   const streamStarted = useRef(false);
 
@@ -80,10 +87,10 @@ export default function OnboardingClient() {
     // messages may legitimately quote the founder back at them.
     const isOpener = seed.length === 0;
     const display = (s: string) => (isOpener ? stripLeadingQuote(s) : s);
+    setRateLimitNotice(null);
     setIsStreaming(true);
     setStreamingText("");
     let acc = "";
-    let firstAttemptFailed = false;
     try {
       for await (const chunk of streamReid({
         mode: "onboarding",
@@ -92,37 +99,21 @@ export default function OnboardingClient() {
         acc += chunk;
         setStreamingText(display(acc));
       }
-    } catch {
-      firstAttemptFailed = true;
-    }
-    if (firstAttemptFailed) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Give me a moment." },
-      ]);
-      setStreamingText("");
-      await new Promise((r) => setTimeout(r, 2000));
-      acc = "";
-      try {
-        for await (const chunk of streamReid({
-          mode: "onboarding",
-          messages: seed,
-        })) {
-          acc += chunk;
-          setStreamingText(display(acc));
-        }
-      } catch {
+    } catch (err) {
+      // NO auto-retry. A per-minute burst 429 shows a manual-retry notice gated
+      // on the countdown; any other failure asks the founder to send again.
+      // Never auto-re-enter the rate-limit window.
+      if (err instanceof RateLimitError) {
+        setRateLimitNotice({ retryAfter: err.retryAfter, seed });
+      } else {
         setMessages((prev) => [
           ...prev,
-          {
-            role: "assistant",
-            content: "My end's jammed. Send it again.",
-          },
+          { role: "assistant", content: "My end's jammed. Send it again." },
         ]);
-        setStreamingText("");
-        setIsStreaming(false);
-        return;
       }
+      setStreamingText("");
+      setIsStreaming(false);
+      return;
     }
 
     // The server strips sentinels from the stream before they reach us, so
@@ -283,6 +274,17 @@ export default function OnboardingClient() {
           />
         </div>
       </div>
+      {rateLimitNotice && (
+        <RateLimitNotice
+          retryAfter={rateLimitNotice.retryAfter}
+          onRetry={() => {
+            const pending = rateLimitNotice;
+            setRateLimitNotice(null);
+            void runStream(pending.seed);
+          }}
+          onDismiss={() => setRateLimitNotice(null)}
+        />
+      )}
     </div>
   );
 }

@@ -41,6 +41,19 @@ export class SessionLimitError extends Error {
   }
 }
 
+/** Thrown when /api/reid returns 429 with `error: "rate_limit_exceeded"` (the
+ *  per-minute burst limiter, distinct from the daily quota). Carries the
+ *  server's Retry-After so callers can show an honest countdown and a
+ *  manual retry instead of blindly re-entering the rate-limit window. */
+export class RateLimitError extends Error {
+  readonly retryAfter: number;
+  constructor(retryAfter: number) {
+    super("rate_limit_exceeded");
+    this.name = "RateLimitError";
+    this.retryAfter = retryAfter;
+  }
+}
+
 export async function* streamReid(
   req: ReidRequest,
   options: StreamReidOptions = {},
@@ -69,18 +82,31 @@ export async function* streamReid(
     throw new Error(`reid 402`);
   }
   if (res.status === 429) {
+    // Capture Retry-After from the header up front (available regardless of
+    // whether the body parses); the body's retryAfter field overrides it.
+    const headerRetry = Number(res.headers.get("Retry-After"));
     let remaining = 0;
+    let retryAfter = Number.isFinite(headerRetry) && headerRetry > 0 ? headerRetry : 0;
     try {
       const body = (await res.json()) as {
         error?: string;
         remaining?: number;
+        retryAfter?: number;
       };
       remaining = typeof body.remaining === "number" ? body.remaining : 0;
+      if (typeof body.retryAfter === "number") retryAfter = body.retryAfter;
+      // Daily quota → paywall trigger (handled by callers via DailyLimitError).
       if (body.error === "daily_limit_exceeded") {
         throw new DailyLimitError(remaining);
       }
+      // Per-minute burst → typed so callers can show an honest countdown +
+      // manual retry rather than auto-re-entering the window.
+      if (body.error === "rate_limit_exceeded") {
+        throw new RateLimitError(retryAfter);
+      }
     } catch (err) {
       if (err instanceof DailyLimitError) throw err;
+      if (err instanceof RateLimitError) throw err;
       // Body wasn't JSON — fall through to the generic error.
     }
     throw new Error(`reid 429`);

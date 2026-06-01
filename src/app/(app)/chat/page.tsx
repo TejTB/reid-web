@@ -7,7 +7,8 @@ import ChatStream from "@/components/ChatStream";
 import LogoMark from "@/components/LogoMark";
 import ReidOrb from "@/components/ReidOrb";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
-import { streamReid, DailyLimitError, SessionLimitError } from "@/lib/reid";
+import { streamReid, DailyLimitError, SessionLimitError, RateLimitError } from "@/lib/reid";
+import RateLimitNotice from "@/components/RateLimitNotice";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
 import { FREE_SESSIONS } from "@/lib/session-shared";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
@@ -164,6 +165,14 @@ function ChatPageInner() {
   // voice orb); the turn-based loop itself lives in useVoiceLoop, whose FSM
   // status drives every in-surface visual (the orb). No SpeechRecognition.
   const [voiceMode, setVoiceMode] = useState(false);
+  // Per-minute burst 429 notice: holds the turn to resend + the wait. Null when
+  // not rate-limited. The notice offers a manual retry gated on a countdown —
+  // never an automatic re-entry of the window.
+  const [rateLimitNotice, setRateLimitNotice] = useState<{
+    retryAfter: number;
+    content: string;
+    files?: File[];
+  } | null>(null);
   const initialized = useRef(false);
 
   const streamWithRetry = useCallback(
@@ -175,6 +184,8 @@ function ChatPageInner() {
       text: string;
       sessionId: string | null;
       walled: boolean;
+      rateLimited: boolean;
+      retryAfter: number;
     }> => {
       let acc = "";
       let resolvedSessionId: string | null = currentSessionId;
@@ -199,7 +210,14 @@ function ChatPageInner() {
           acc += chunk;
           setStreamingText(acc);
         }
-        return { ok: true, text: acc, sessionId: resolvedSessionId, walled: false };
+        return {
+          ok: true,
+          text: acc,
+          sessionId: resolvedSessionId,
+          walled: false,
+          rateLimited: false,
+          retryAfter: 0,
+        };
       } catch (err) {
         // Paywall (402): session_limit_reached opens the upgrade modal and
         // rolls back the optimistic user turn. No retry — the free quota is
@@ -213,11 +231,12 @@ function ChatPageInner() {
             text: "",
             sessionId: resolvedSessionId,
             walled: true,
+            rateLimited: false,
+            retryAfter: 0,
           };
         }
-        // Paywall: 429 daily_limit_exceeded opens the upgrade modal and
-        // rolls back the optimistic user turn — no retry, no "Give me a
-        // moment" placeholder.
+        // Paywall: 429 daily_limit_exceeded opens the upgrade modal and rolls
+        // back the optimistic user turn — no retry.
         if (err instanceof DailyLimitError) {
           openPaywall("session_limit");
           setMessages((prev) => prev.slice(0, -1));
@@ -227,37 +246,38 @@ function ChatPageInner() {
             text: "",
             sessionId: resolvedSessionId,
             walled: true,
+            rateLimited: false,
+            retryAfter: 0,
           };
         }
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "Give me a moment." },
-        ]);
-        setStreamingText("");
-        await new Promise((r) => setTimeout(r, 2000));
-        acc = "";
-        try {
-          for await (const chunk of streamReid(
-            {
-              mode: "chat",
-              sessionId: currentSessionId,
-              messages: msgs,
-            },
-            { onSession, onActions, onSessionEnd },
-          )) {
-            acc += chunk;
-            setStreamingText(acc);
-          }
-          return { ok: true, text: acc, sessionId: resolvedSessionId, walled: false };
-        } catch (retryErr) {
-          const walled =
-            retryErr instanceof DailyLimitError ||
-            retryErr instanceof SessionLimitError;
-          if (walled) {
-            openPaywall("session_limit");
-          }
-          return { ok: false, text: "", sessionId: resolvedSessionId, walled };
+        // Per-minute burst (429 rate_limit_exceeded): NO auto-retry — a retry
+        // would just re-enter the open window. Roll back the optimistic turn
+        // and report retryAfter so the caller can show a manual-retry notice
+        // that only enables once the countdown elapses.
+        if (err instanceof RateLimitError) {
+          setMessages((prev) => prev.slice(0, -1));
+          setStreamingText("");
+          return {
+            ok: false,
+            text: "",
+            sessionId: resolvedSessionId,
+            walled: false,
+            rateLimited: true,
+            retryAfter: err.retryAfter,
+          };
         }
+        // Generic failure (network/5xx): NO auto-retry. Surface "send again"
+        // (handled by the caller) and let the founder decide — a blind retry
+        // usually fails again and just doubles latency + cost.
+        setStreamingText("");
+        return {
+          ok: false,
+          text: "",
+          sessionId: resolvedSessionId,
+          walled: false,
+          rateLimited: false,
+          retryAfter: 0,
+        };
       }
     },
     [],
@@ -443,6 +463,7 @@ function ChatPageInner() {
     const nextMessages: Message[] = [...messages, userMessage];
     setMessages(nextMessages);
     setPendingActions([]);
+    setRateLimitNotice(null);
     setIsStreaming(true);
     setStreamingText("");
     const result = await streamWithRetry(sessionId, nextMessages);
@@ -453,6 +474,16 @@ function ChatPageInner() {
     if (result.sessionId && result.sessionId !== sessionId) {
       setSessionId(result.sessionId);
       setChatSessionId(result.sessionId);
+    }
+
+    if (result.rateLimited) {
+      // Burst limiter: streamWithRetry already rolled back the optimistic turn.
+      // Stash this exact turn so the manual-retry notice can re-send it once
+      // the countdown clears. No auto-retry.
+      setRateLimitNotice({ retryAfter: result.retryAfter, content, files });
+      setStreamingText("");
+      setIsStreaming(false);
+      return;
     }
 
     if (!result.ok) {
@@ -831,6 +862,17 @@ function ChatPageInner() {
             This is your last free session.
           </div>
         </div>
+      )}
+      {rateLimitNotice && (
+        <RateLimitNotice
+          retryAfter={rateLimitNotice.retryAfter}
+          onRetry={() => {
+            const pending = rateLimitNotice;
+            setRateLimitNotice(null);
+            void handleSend(pending.content, pending.files);
+          }}
+          onDismiss={() => setRateLimitNotice(null)}
+        />
       )}
       {!bootstrapError && (
         <div className="fixed left-0 right-0 z-50 bottom-[calc(64px+env(safe-area-inset-bottom))] md:bottom-0 px-4 pb-4 pt-2">

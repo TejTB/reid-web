@@ -488,7 +488,7 @@ export async function POST(req: NextRequest) {
           status: 429,
           headers: {
             "Retry-After": String(minute.retryAfter),
-            "X-RateLimit-Limit": "8",
+            "X-RateLimit-Limit": "20",
             "X-RateLimit-Remaining": "0",
           },
         },

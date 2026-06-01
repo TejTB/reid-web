@@ -6,7 +6,7 @@ import { Redis } from "@upstash/redis";
 import { z } from "zod";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { getEntitlement } from "@/lib/entitlement";
-import { checkReidMinuteLimit } from "@/lib/ratelimit";
+import { checkVoiceMinuteLimit } from "@/lib/ratelimit";
 
 // Reid's ElevenLabs voice. Pinned to a single id so the brand voice never
 // drifts. Output is mp3_44100_128 (the SDK's default) — adequate for chat
@@ -99,12 +99,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "reid_pro_required" }, { status: 403 });
   }
 
-  // Burst protection (8/min/user), shared key with /api/reid + /api/transcribe.
-  // Closes the previously-uncapped ElevenLabs cost/abuse surface on this route.
-  // Pro is exempt (voice turns hit transcribe + reid + tts on the same minute
-  // key; a non-exempt Pro tester would cap out mid-conversation).
+  // Burst protection on the dedicated VOICE bucket (30/min/user), shared only
+  // with /api/transcribe — NOT the conversational /api/reid key. Closes the
+  // previously-uncapped ElevenLabs cost/abuse surface on this route. Pro is
+  // exempt (a non-exempt Pro tester would cap out mid spoken conversation).
   if (!entitlement.isPro) {
-    const limit = await checkReidMinuteLimit(user.id);
+    const limit = await checkVoiceMinuteLimit(user.id);
     if (!limit.allowed) {
       return NextResponse.json(
         { error: "rate_limited" },

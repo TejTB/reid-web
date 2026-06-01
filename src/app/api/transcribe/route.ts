@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
 import { getAuthedUser } from "@/lib/supabase-auth";
-import { checkReidMinuteLimit } from "@/lib/ratelimit";
+import { checkVoiceMinuteLimit } from "@/lib/ratelimit";
 
 // Speech-to-text for the native voice loop. The native client records an
 // .m4a clip and POSTs it here as multipart/form-data (field "file"); we hand
@@ -25,9 +25,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // Burst protection, shared with /api/reid (8/min/user). Transcription is the
-  // first hop of every spoken turn, so the same budget is the right ceiling.
-  const limit = await checkReidMinuteLimit(authed.user.id);
+  // Burst protection on the dedicated VOICE bucket (30/min/user), shared only
+  // with /api/tts — NOT the conversational /api/reid key. Transcription is the
+  // first hop of every spoken turn; keeping it off the chat budget means a
+  // voice turn's audio hops can't 429 the founder's next typed message.
+  const limit = await checkVoiceMinuteLimit(authed.user.id);
   if (!limit.allowed) {
     return NextResponse.json(
       { error: "rate_limited" },
