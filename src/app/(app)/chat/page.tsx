@@ -3,8 +3,10 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
+import { MessageSquare } from "lucide-react";
 import ChatStream from "@/components/ChatStream";
 import LogoMark from "@/components/LogoMark";
+import ReidMark from "@/components/ReidMark";
 import ReidOrb from "@/components/ReidOrb";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
 import { streamReid, DailyLimitError, SessionLimitError, RateLimitError } from "@/lib/reid";
@@ -736,6 +738,25 @@ function ChatPageInner() {
               </span>
             );
           })()}
+          {/* Discreet chat↔voice toggle. Shows the destination mode's icon:
+              the circular ReidMark to enter voice (Pro-gated via handleMicClick,
+              which opens the paywall for free users), a chat bubble to return to
+              text. Hidden in text mode when voice isn't supported here. */}
+          {(voiceMode || voice.isSupported) && (
+            <button
+              type="button"
+              onClick={voiceMode ? exitVoiceMode : handleMicClick}
+              aria-label={voiceMode ? "Switch to text chat" : "Switch to voice"}
+              title={voiceMode ? "Switch to text chat" : "Switch to voice"}
+              className="flex items-center justify-center rounded-full p-1 text-white/30 transition-colors hover:text-white/60 outline-none focus-visible:ring-2 focus-visible:ring-[#8E1616]/50"
+            >
+              {voiceMode ? (
+                <MessageSquare className="h-5 w-5" aria-hidden />
+              ) : (
+                <ReidMark size={22} />
+              )}
+            </button>
+          )}
         </div>
       </header>
       {bootstrapError ? (
@@ -925,13 +946,6 @@ function ChatPageInner() {
                       )}
                     </motion.div>
                   </AnimatePresence>
-                  <button
-                    type="button"
-                    onClick={exitVoiceMode}
-                    className="text-white/20 text-xs hover:text-white/40 font-sans"
-                  >
-                    Switch to text
-                  </button>
                 </motion.div>
               ) : (
                 <motion.div
