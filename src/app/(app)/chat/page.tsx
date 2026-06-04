@@ -7,7 +7,7 @@ import { MessageSquare } from "lucide-react";
 import ChatStream from "@/components/ChatStream";
 import LogoMark from "@/components/LogoMark";
 import ReidMark from "@/components/ReidMark";
-import ReidOrb from "@/components/ReidOrb";
+import ReidWebOrb from "@/components/ReidWebOrb";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
 import { streamReid, DailyLimitError, SessionLimitError, RateLimitError } from "@/lib/reid";
 import RateLimitNotice from "@/components/RateLimitNotice";
@@ -580,6 +580,20 @@ function ChatPageInner() {
     setVoiceMode(false);
   }, []);
 
+  // Responsive orb diameter for the voice shell — generous, but always within
+  // the viewport and capped so it stays a focal object rather than a wall.
+  // Recomputed on resize / orientation change.
+  const [orbSize, setOrbSize] = useState(280);
+  useEffect(() => {
+    const calc = () => {
+      const minEdge = Math.min(window.innerWidth, window.innerHeight);
+      setOrbSize(Math.max(200, Math.min(300, Math.round(minEdge * 0.62))));
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, []);
+
   // The orb IS the control. Tap semantics by FSM status: idle → start a turn;
   // recording → stop capture early; speaking → cancel playback (→ idle);
   // recoverable error → retry (the FSM maps START from a recoverable error
@@ -696,7 +710,10 @@ function ChatPageInner() {
         height: "100vh",
         display: "flex",
         flexDirection: "column",
-        background: "#0A1628",
+        // Voice mode is an orb-only, near-black surface; text mode is the
+        // normal chat bg. Crossfade so the toggle feels like one surface.
+        background: voiceMode ? "#050810" : "#0A1628",
+        transition: "background 320ms ease",
         overflow: "hidden",
         position: "relative",
       }}
@@ -759,7 +776,63 @@ function ChatPageInner() {
           )}
         </div>
       </header>
-      {bootstrapError ? (
+      {voiceMode ? (
+        // Voice-mode shell: ChatStream is hidden entirely (not dimmed). The orb
+        // IS the control, centered with generous space; the bottom input strip
+        // is removed below while voiceMode is on. Exit is via the header toggle.
+        <motion.div
+          key="voice-shell"
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
+          className="flex-1 flex flex-col items-center justify-center"
+          style={{
+            paddingLeft: 24,
+            paddingRight: 24,
+            paddingBottom: "calc(env(safe-area-inset-bottom) + 32px)",
+          }}
+        >
+          {/* The orb IS the control: a tap target whose visual is the
+              FSM-driven ReidWebOrb (WebGL, audio-free). Disabled while busy
+              (transcribing / thinking) and when voice is terminally unsupported. */}
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.96 }}
+            onClick={onOrbTap}
+            disabled={
+              voiceStatus === "transcribing" ||
+              voiceStatus === "thinking" ||
+              (voiceStatus === "error" &&
+                voice.state.error === "unsupported")
+            }
+            aria-label={ORB_TAP_LABEL[voiceStatus]}
+            className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#8E1616]/50 disabled:cursor-default"
+          >
+            <ReidWebOrb status={voiceStatus} size={orbSize} />
+          </motion.button>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={voiceStatus}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="mt-10 flex min-h-[1.25rem] items-center justify-center"
+            >
+              {voiceStatus === "thinking" ? (
+                <ShiningText text="thinking." />
+              ) : (
+                <span className="text-white/50 text-sm font-sans">
+                  {VOICE_CAPTION[
+                    voiceStatus === "error"
+                      ? voice.state.error ?? "api"
+                      : voiceStatus
+                  ]}
+                </span>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
+      ) : bootstrapError ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
           <p className="font-serif italic text-text-dim text-lg">
             My end is jammed.
@@ -895,80 +968,27 @@ function ChatPageInner() {
           onDismiss={() => setRateLimitNotice(null)}
         />
       )}
-      {!bootstrapError && (
+      {!bootstrapError && !voiceMode && (
         <div className="fixed left-0 right-0 z-50 bottom-[calc(64px+env(safe-area-inset-bottom))] md:bottom-0 px-4 pb-4 pt-2">
           <div className="mx-auto max-w-[720px]">
-            <AnimatePresence mode="wait">
-              {voiceMode ? (
-                <motion.div
-                  key="voice-mode"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 20 }}
-                  className="flex flex-col items-center justify-center pb-2 pt-2 gap-6"
-                >
-                  {/* The orb IS the control: a tap target whose visual is the
-                      FSM-driven ReidOrb. Disabled while busy (transcribing /
-                      thinking) and when voice is terminally unsupported. */}
-                  <motion.button
-                    type="button"
-                    whileTap={{ scale: 0.96 }}
-                    onClick={onOrbTap}
-                    disabled={
-                      voiceStatus === "transcribing" ||
-                      voiceStatus === "thinking" ||
-                      (voiceStatus === "error" &&
-                        voice.state.error === "unsupported")
-                    }
-                    aria-label={ORB_TAP_LABEL[voiceStatus]}
-                    className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#8E1616]/50 disabled:cursor-default"
-                  >
-                    <ReidOrb status={voiceStatus} size={200} />
-                  </motion.button>
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={voiceStatus}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="flex min-h-[1.25rem] items-center justify-center"
-                    >
-                      {voiceStatus === "thinking" ? (
-                        <ShiningText text="thinking." />
-                      ) : (
-                        <span className="text-white/50 text-xs font-sans">
-                          {VOICE_CAPTION[
-                            voiceStatus === "error"
-                              ? voice.state.error ?? "api"
-                              : voiceStatus
-                          ]}
-                        </span>
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="text-mode"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 20 }}
-                >
-                  <PromptInputBox
-                    onSend={handleSend}
-                    isLoading={isStreaming || !loaded}
-                    placeholder="What's the situation?"
-                    initialValue={prefillFromUrl}
-                    onMicClick={voice.isSupported ? handleMicClick : undefined}
-                    inlineBadge={
-                      !isPro && voice.isSupported ? (
-                        <ShiningText text="PRO" />
-                      ) : undefined
-                    }
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <motion.div
+              key="text-mode"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <PromptInputBox
+                onSend={handleSend}
+                isLoading={isStreaming || !loaded}
+                placeholder="What's the situation?"
+                initialValue={prefillFromUrl}
+                onMicClick={voice.isSupported ? handleMicClick : undefined}
+                inlineBadge={
+                  !isPro && voice.isSupported ? (
+                    <ShiningText text="PRO" />
+                  ) : undefined
+                }
+              />
+            </motion.div>
           </div>
         </div>
       )}
