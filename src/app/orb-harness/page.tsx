@@ -2,14 +2,17 @@
 
 // Sprint 12 Build 2b — RUNNABLE orb harness (dev/review only, NOT linked in nav).
 //
-// Renders <ReidOrb> in all six FSM states for a LIVE motion review (feel + 60fps,
+// Renders the orb in all six FSM states for a LIVE motion review (feel + 60fps,
 // not just static paint) and for screenshot capture (desktop + iPhone viewport).
 // Also exposes ?state=<status> to isolate one state full-bleed for a clean shot,
 // and ?cycle=1 to auto-advance through states so a screen recording captures the
-// transitions. Delete-safe: nothing else imports this route.
+// transitions. ?web=1 swaps the CSS <ReidOrb> for the WebGL <ReidWebOrb>
+// (Sprint 12 voice revamp) — same prop interface, so every control still works.
+// Delete-safe: nothing else imports this route.
 
 import { useEffect, useState } from "react";
 import ReidOrb from "@/components/ReidOrb";
+import ReidWebOrb from "@/components/ReidWebOrb";
 import type { VoiceStatus } from "@/lib/voice-loop-fsm";
 
 const STATES: VoiceStatus[] = [
@@ -26,6 +29,7 @@ export default function OrbHarnessPage() {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const single = params?.get("state") as VoiceStatus | null;
   const cycle = params?.get("cycle") === "1";
+  const Orb = params?.get("web") === "1" ? ReidWebOrb : ReidOrb;
 
   useEffect(() => {
     if (!cycle) return;
@@ -43,7 +47,7 @@ export default function OrbHarnessPage() {
           placeItems: "center",
         }}
       >
-        <ReidOrb status={single} size={280} />
+        <Orb status={single} size={280} />
       </main>
     );
   }
@@ -60,7 +64,7 @@ export default function OrbHarnessPage() {
           gap: 24,
         }}
       >
-        <ReidOrb status={s} size={280} />
+        <Orb status={s} size={280} />
         <div
           style={{
             color: "#F2EDE3",
@@ -101,7 +105,7 @@ export default function OrbHarnessPage() {
               border: "1px solid rgba(242,237,232,0.08)",
             }}
           >
-            <ReidOrb status={s} size={200} />
+            <Orb status={s} size={200} />
             <span
               style={{
                 color: "#F2EDE3",
