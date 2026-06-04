@@ -267,29 +267,56 @@ export default function ReidWebOrb({
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    let rafId = 0;
+    // Eased animation state lives OUTSIDE the GL instance so it persists across
+    // a context loss/restore — the orb resumes its current look rather than
+    // snapping back to defaults. Seeded from the live status' targets.
+    let elapsed = 0; // shader time (frozen under reduced motion)
+    let rotSpeed = ORB_TARGETS[statusRef.current].rotSpeed;
+    let currentRot = 0;
+    let hover = ORB_TARGETS[statusRef.current].hover;
+    let hoverIntensity = ORB_TARGETS[statusRef.current].hoverIntensity;
+    let brightness = ORB_TARGETS[statusRef.current].brightness;
+    let pulseAmp = ORB_TARGETS[statusRef.current].pulseAmp;
 
-    try {
-      const renderer = new Renderer({
-        alpha: true,
-        premultipliedAlpha: false,
-        antialias: true,
-        dpr: Math.min(window.devicePixelRatio || 1, MAX_DPR),
-      });
+    let disposed = false; // effect cleanup has run — block any pending rebuild
+    let teardownGL: (() => void) | null = null;
+
+    // Builds one full GL instance (renderer → canvas → program → mesh → loop)
+    // and returns its teardown. Called on mount and again on context restore.
+    // iOS Safari drops the WebGL context on backgrounding / memory pressure; we
+    // preventDefault() the loss (so a restore is allowed) and rebuild on restore
+    // so the orb comes back instead of staying a blank container forever.
+    const buildGL = (): (() => void) | null => {
+      let renderer: Renderer;
+      try {
+        renderer = new Renderer({
+          alpha: true,
+          premultipliedAlpha: false,
+          antialias: true,
+          dpr: Math.min(window.devicePixelRatio || 1, MAX_DPR),
+        });
+      } catch {
+        // WebGL unavailable / context creation failed — leave an empty
+        // container. The orb is decorative; the FSM caption still conveys state.
+        return null;
+      }
       const gl = renderer.gl;
+      const canvas = gl.canvas;
       gl.clearColor(0, 0, 0, 0);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
       while (container.firstChild) container.removeChild(container.firstChild);
-      container.appendChild(gl.canvas);
+      container.appendChild(canvas);
 
       const geometry = new Triangle(gl);
+      // Seed uniforms from the persisted eased state so a rebuild paints the
+      // current look on the first frame (no flash back to defaults).
       const program = new Program(gl, {
         vertex: vert,
         fragment: frag,
         uniforms: {
-          iTime: { value: 0 },
+          iTime: { value: elapsed },
           iResolution: {
             value: new Vec3(
               gl.canvas.width,
@@ -298,10 +325,10 @@ export default function ReidWebOrb({
             ),
           },
           hue: { value: 0 },
-          hover: { value: 0 },
-          rot: { value: 0 },
-          hoverIntensity: { value: 0 },
-          brightness: { value: ORB_TARGETS[statusRef.current].brightness },
+          hover: { value: hover },
+          rot: { value: currentRot },
+          hoverIntensity: { value: hoverIntensity },
+          brightness: { value: brightness },
         },
       });
       const mesh = new Mesh(gl, { geometry, program });
@@ -325,15 +352,8 @@ export default function ReidWebOrb({
       window.addEventListener("resize", resize);
       resize();
 
-      // Per-frame eased state. Each lerps toward ORB_TARGETS[status].
-      let lastT = 0;
-      let elapsed = 0; // shader time (frozen under reduced motion)
-      let rotSpeed = ORB_TARGETS[statusRef.current].rotSpeed;
-      let currentRot = 0;
-      let hover = ORB_TARGETS[statusRef.current].hover;
-      let hoverIntensity = ORB_TARGETS[statusRef.current].hoverIntensity;
-      let brightness = ORB_TARGETS[statusRef.current].brightness;
-      let pulseAmp = ORB_TARGETS[statusRef.current].pulseAmp;
+      let rafId = 0;
+      let lastT = 0; // reset per build so a resume doesn't spike dt
 
       const update = (t: number) => {
         rafId = requestAnimationFrame(update);
@@ -362,28 +382,52 @@ export default function ReidWebOrb({
           brightness + pulseAmp * Math.sin(elapsed * PULSE_FREQ);
 
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        if (renderer) renderer.render({ scene: mesh });
+        renderer.render({ scene: mesh });
       };
+
+      // Context-loss handling — canvas events ONLY, no new APIs (audio-free).
+      const onLost = (e: Event) => {
+        e.preventDefault(); // allow the browser to restore this context
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+      };
+      const onRestored = () => {
+        // Tear down this (dead) instance and rebuild a fresh one. The eased
+        // animation state in the closure carries over, so the orb resumes.
+        const prev = teardownGL;
+        teardownGL = null;
+        prev?.();
+        if (!disposed) teardownGL = buildGL();
+      };
+      canvas.addEventListener("webglcontextlost", onLost, false);
+      canvas.addEventListener("webglcontextrestored", onRestored, false);
+
       rafId = requestAnimationFrame(update);
 
       return () => {
-        cancelAnimationFrame(rafId);
+        if (rafId) cancelAnimationFrame(rafId);
         ro?.disconnect();
         window.removeEventListener("resize", resize);
+        canvas.removeEventListener("webglcontextlost", onLost);
+        canvas.removeEventListener("webglcontextrestored", onRestored);
         try {
-          if (container.contains(gl.canvas)) container.removeChild(gl.canvas);
+          if (container.contains(canvas)) container.removeChild(canvas);
         } catch {
           // Canvas already detached — nothing to do.
         }
         gl.getExtension("WEBGL_lose_context")?.loseContext();
       };
-    } catch {
-      // WebGL unavailable / context creation failed — leave an empty container.
-      // The orb is decorative; the FSM caption beneath it still conveys state.
-      return () => {
-        if (rafId) cancelAnimationFrame(rafId);
-      };
-    }
+    };
+
+    teardownGL = buildGL();
+
+    return () => {
+      disposed = true;
+      teardownGL?.();
+      teardownGL = null;
+    };
   }, []);
 
   return (
