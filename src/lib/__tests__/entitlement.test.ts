@@ -91,7 +91,11 @@ test("Pro bypasses the count entirely (entitled regardless of usage, never reads
   assert.equal(state.sessionsQueried, false);
 });
 
-test("free user UNDER allowance is entitled (0 used, allowance 1)", async () => {
+test("allowance is 2 (Sprint 12 Build C: two free real sessions, lifetime)", () => {
+  assert.equal(FREE_SESSION_ALLOWANCE, 2);
+});
+
+test("free user with 0 real sessions is entitled (session 1)", async () => {
   const { client } = makeClient({
     userRow: { id: USER_ID, subscription_status: "free" },
     sessionCount: 0,
@@ -102,20 +106,32 @@ test("free user UNDER allowance is entitled (0 used, allowance 1)", async () => 
   assert.equal(r.entitled, true);
 });
 
-test("free user AT allowance is walled (1 used, allowance 1)", async () => {
+test("free user with 1 real session is STILL entitled (session 2 — the memory callback)", async () => {
+  // The funnel's magic moment: with allowance 2, having used one real session
+  // must NOT wall the second. (This is the case the old allowance-1 gate broke.)
   const { client } = makeClient({
     userRow: { id: USER_ID, subscription_status: "free" },
     sessionCount: 1,
   });
   const r = await getEntitlement(client, AUTH_ID);
-  assert.equal(r.entitled, false);
   assert.equal(r.sessionsUsed, 1);
+  assert.equal(r.entitled, true);
+});
+
+test("free user AT allowance (2 real sessions) is walled (session 3)", async () => {
+  const { client } = makeClient({
+    userRow: { id: USER_ID, subscription_status: "free" },
+    sessionCount: FREE_SESSION_ALLOWANCE,
+  });
+  const r = await getEntitlement(client, AUTH_ID);
+  assert.equal(r.sessionsUsed, FREE_SESSION_ALLOWANCE);
+  assert.equal(r.entitled, false);
 });
 
 test("null subscription_status is treated as free", async () => {
   const { client } = makeClient({
     userRow: { id: USER_ID, subscription_status: null },
-    sessionCount: 1,
+    sessionCount: FREE_SESSION_ALLOWANCE,
   });
   const r = await getEntitlement(client, AUTH_ID);
   assert.equal(r.isPro, false);
@@ -140,7 +156,7 @@ test("COUNT is filtered to non-onboarding, message-bearing sessions for this use
 test("with NO excludeSessionId applies NO id-exclusion AND still walls at allowance", async () => {
   const { client, state } = makeClient({
     userRow: { id: USER_ID, subscription_status: "free" },
-    sessionCount: 1,
+    sessionCount: FREE_SESSION_ALLOWANCE,
   });
   const r = await getEntitlement(client, AUTH_ID);
   // No `id <> NULL` — that matches no rows in SQL, zeroing the count and
@@ -150,7 +166,7 @@ test("with NO excludeSessionId applies NO id-exclusion AND still walls at allowa
     0,
     "must not apply an id exclusion when excludeSessionId is absent",
   );
-  assert.equal(r.sessionsUsed, 1);
+  assert.equal(r.sessionsUsed, FREE_SESSION_ALLOWANCE);
   assert.equal(r.entitled, false);
 });
 
@@ -182,11 +198,35 @@ test("first session in progress does NOT wall itself (excluded from the count)",
 test("null excludeSessionId behaves the same as absent (no id exclusion)", async () => {
   const { client, state } = makeClient({
     userRow: { id: USER_ID, subscription_status: "free" },
-    sessionCount: 1,
+    sessionCount: FREE_SESSION_ALLOWANCE,
   });
   const r = await getEntitlement(client, AUTH_ID, { excludeSessionId: null });
   assert.equal(state.neqCalls.filter(([c]) => c === "id").length, 0);
   assert.equal(r.entitled, false);
+});
+
+// ---- Display == enforcement -------------------------------------------------
+// Both GET /api/entitlement (what the UI shows) and the /api/reid 402 gate
+// consume this SAME getEntitlement. So the displayed pair {sessionsUsed,
+// allowance} and the gate decision can never disagree: `entitled` is exactly
+// `sessionsUsed < allowance` for a free user. If this invariant holds, a
+// surface that renders the seam's numbers is showing precisely the wall the
+// server enforces.
+test("free user: entitled is exactly (sessionsUsed < allowance) across the range", async () => {
+  for (let count = 0; count <= FREE_SESSION_ALLOWANCE + 1; count += 1) {
+    const { client } = makeClient({
+      userRow: { id: USER_ID, subscription_status: "free" },
+      sessionCount: count,
+    });
+    const r = await getEntitlement(client, AUTH_ID);
+    assert.equal(r.allowance, FREE_SESSION_ALLOWANCE);
+    assert.equal(r.sessionsUsed, count);
+    assert.equal(
+      r.entitled,
+      r.sessionsUsed < r.allowance,
+      `count ${count}: displayed numbers must imply the same gate decision`,
+    );
+  }
 });
 
 test("unprovisioned user (no users row) is not entitled and not pro", async () => {

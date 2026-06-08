@@ -22,7 +22,6 @@ type LoadedUser = Pick<
   | "onboarding_task"
   | "onboarding_task_completed_at"
   | "session_count"
-  | "sessions_used_this_month"
   | "streak_days"
   | "subscription_status"
   | "created_at"
@@ -236,13 +235,12 @@ export default function HomePage() {
 
   // Banner condition logic. Sprint 11: only fire when ALL true:
   //   - account is more than 24 hours old
-  //   - user has had at least one session (either monthly or lifetime)
+  //   - user has had at least one session (lifetime session_count)
   //   - their streak has dropped to 0
   // Day-0 / zero-session accounts must never see this banner.
   let bannerTitle: string | null = null;
   const accountOlderThan24h = isOlderThan24h(user.created_at);
-  const hasHadAtLeastOneSession =
-    (user.sessions_used_this_month ?? 0) > 0 || sessionCount > 0;
+  const hasHadAtLeastOneSession = sessionCount > 0;
   if (
     accountOlderThan24h &&
     hasHadAtLeastOneSession &&

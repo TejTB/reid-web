@@ -2,9 +2,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
-import { useAuth } from "@/components/AuthProvider";
+import { useAuth, useEntitlement } from "@/components/AuthProvider";
 import { GlowCard } from "@/components/ui/glow-card";
-import { FREE_SESSIONS, getMySessions } from "@/lib/session";
+import { getMySessions } from "@/lib/session";
 import type { Session, User } from "@/types/db";
 
 const MONTHS_SHORT = [
@@ -82,6 +82,7 @@ type TimelineRow =
 export default function PlanPage() {
   const router = useRouter();
   const { me, loading: authLoading } = useAuth();
+  const entitlement = useEntitlement();
   const [user, setUser] = useState<User | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -121,8 +122,8 @@ export default function PlanPage() {
   // - The single active chat session (ended_at IS NULL, if any) shows the
   //   pulsing red dot and "Active now". Only ONE row can be active.
   // - For free users, dim "Not yet" rows with a lock icon fill the remaining
-  //   slots up to FREE_SESSIONS chat sessions, showing the user the rest of
-  //   the road. Pro users see no locks — their roadmap is unbounded.
+  //   slots up to the live free allowance of chat sessions, showing the user
+  //   the rest of the road. Pro users see no locks — their roadmap is unbounded.
   const rows: TimelineRow[] = [];
   const onboardingSummary = user?.onboarding_summary?.trim() ?? "";
   const isPro = user?.subscription_status === "pro";
@@ -160,9 +161,10 @@ export default function PlanPage() {
       actualSessionCount += 1;
     });
 
-    // Free-tier roadmap: pad with locked rows up to FREE_SESSIONS chat sessions.
+    // Free-tier roadmap: pad with locked rows up to the live free allowance.
     if (!isPro) {
-      const remaining = Math.max(0, FREE_SESSIONS - actualSessionCount);
+      const allowance = entitlement?.allowance ?? 0;
+      const remaining = Math.max(0, allowance - actualSessionCount);
       for (let k = 0; k < remaining; k += 1) {
         const label = `SESSION ${actualSessionCount + 2 + k}`;
         rows.push({ kind: "locked", label });

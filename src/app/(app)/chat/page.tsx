@@ -12,7 +12,6 @@ import { useAuth, useIsPro } from "@/components/AuthProvider";
 import { streamReid, DailyLimitError, SessionLimitError, RateLimitError } from "@/lib/reid";
 import RateLimitNotice from "@/components/RateLimitNotice";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
-import { FREE_SESSIONS } from "@/lib/session-shared";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
 import { useVoiceLoop, type ReidTurnOutcome } from "@/lib/useVoiceLoop";
 import { supabase } from "@/lib/supabase";
@@ -127,7 +126,7 @@ function ChatPageInner() {
     const raw = searchParams?.get("prefill") ?? "";
     return raw.trim().length > 0 ? raw : undefined;
   }, [searchParams]);
-  const { me, loading: authLoading } = useAuth();
+  const { me, entitlement, refresh, loading: authLoading } = useAuth();
   const isPro = useIsPro();
   const userId = me?.id ?? "";
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -702,7 +701,14 @@ function ChatPageInner() {
     {endedSessionId && (
       <SessionRecapOverlay
         sessionId={endedSessionId}
-        onClose={() => setEndedSessionId(null)}
+        onClose={() => {
+          setEndedSessionId(null);
+          // 1e: the just-ended session is now counted; refresh the entitlement
+          // seam at the open of the NEXT session (0 messages) so the pill
+          // reflects prior sessions only. Never refreshed mid-session, so the
+          // count can't creep toward the wall while the user is talking.
+          void refresh();
+        }}
       />
     )}
     <div
@@ -737,10 +743,14 @@ function ChatPageInner() {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {!isPro && me && (() => {
-            const usedThisMonth = me.sessions_used_this_month ?? 0;
-            const displayed = Math.min(FREE_SESSIONS, usedThisMonth + 1);
-            const onLastFree = displayed >= FREE_SESSIONS;
+          {!isPro && entitlement && (() => {
+            // Display only — never authorization. The seam reflects PRIOR
+            // sessions (refreshed at session open, 0 messages), so the
+            // in-flight session is the (used + 1)-th. The wall itself is the
+            // server 402 at session-3 creation, not this number.
+            const { sessionsUsed, allowance } = entitlement;
+            const displayed = Math.min(allowance, sessionsUsed + 1);
+            const onLastFree = displayed >= allowance;
             return (
               <span
                 className="font-sans"
@@ -751,7 +761,7 @@ function ChatPageInner() {
                   fontVariantNumeric: "tabular-nums",
                 }}
               >
-                Session {displayed} of {FREE_SESSIONS}
+                Session {displayed} of {entitlement.allowance}
               </span>
             );
           })()}
@@ -935,7 +945,7 @@ function ChatPageInner() {
           </div>
         </div>
       )}
-      {!isPro && me && (me.sessions_used_this_month ?? 0) + 1 >= FREE_SESSIONS && (
+      {!isPro && entitlement && entitlement.sessionsUsed + 1 >= entitlement.allowance && (
         <div
           className="fixed left-0 right-0 z-50 bottom-[calc(64px+env(safe-area-inset-bottom)+96px)] md:bottom-[96px] pointer-events-none"
           aria-live="polite"

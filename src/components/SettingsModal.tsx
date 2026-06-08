@@ -1,8 +1,8 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FREE_SESSIONS, signOut } from "@/lib/session";
-import { useMe } from "./AuthProvider";
+import { signOut } from "@/lib/session";
+import { useMe, useEntitlement } from "./AuthProvider";
 
 // Mounted once globally (inside AppShell). Listens for the `reid:open-settings`
 // CustomEvent dispatched by the sidebar gear button and renders a centered
@@ -19,20 +19,17 @@ import { useMe } from "./AuthProvider";
 export default function SettingsModal() {
   const router = useRouter();
   const me = useMe();
+  const entitlement = useEntitlement();
   const status = me?.subscription_status ?? "free";
   const isPro = status === "pro";
   const isPastDue = status === "past_due";
-  // Clamp the monthly free-tier counter to FREE_SESSIONS so the visible
-  // number can never exceed the quota even if the server-side count drifts.
-  // Reads sessions_used_this_month (the gating counter), not the lifetime
-  // session_count.
-  const rawSessionCount = me?.sessions_used_this_month ?? 0;
+  // Display only — reads the entitlement seam (the single source the 402 gate
+  // also honours), clamped to the live allowance so the visible number can
+  // never exceed the quota even if the count drifts mid-session.
+  const allowance = entitlement?.allowance ?? 0;
+  const rawSessionCount = entitlement?.sessionsUsed ?? 0;
   const usedSessions =
-    rawSessionCount <= 0
-      ? 0
-      : rawSessionCount >= FREE_SESSIONS
-      ? FREE_SESSIONS
-      : rawSessionCount;
+    rawSessionCount <= 0 ? 0 : Math.min(rawSessionCount, allowance);
   const [open, setOpen] = useState(false);
   // Drives the entrance opacity/translateY transition. We mount when `open`
   // flips true, then flip `visible` next frame so the transition runs.
@@ -197,7 +194,7 @@ export default function SettingsModal() {
                   ? "Reid Pro — unlimited"
                   : isPastDue
                   ? "Payment failed"
-                  : `Free · ${usedSessions} of ${FREE_SESSIONS} this month`}
+                  : `Free · ${usedSessions} of ${allowance} free sessions`}
               </span>
               <button
                 type="button"

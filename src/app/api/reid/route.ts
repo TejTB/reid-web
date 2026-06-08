@@ -379,9 +379,7 @@ export async function POST(req: NextRequest) {
   // can decide whether to rate-limit.
   const { data: meRow } = await db
     .from("users")
-    .select(
-      "id, subscription_status, name, sessions_used_this_month, sessions_month_start",
-    )
+    .select("id, subscription_status, name")
     .eq("auth_id", authUser.id)
     .maybeSingle();
   if (!meRow?.id) {
@@ -391,10 +389,6 @@ export async function POST(req: NextRequest) {
   const subscriptionStatus =
     (meRow.subscription_status as string | null) ?? "free";
   const existingName = (meRow.name as string | null) ?? null;
-  let sessionsUsedThisMonth =
-    (meRow.sessions_used_this_month as number | null) ?? 0;
-  const sessionsMonthStartIso =
-    (meRow.sessions_month_start as string | null) ?? null;
 
   if (!existingName) {
     const extracted = extractName(messages);
@@ -428,38 +422,11 @@ export async function POST(req: NextRequest) {
   // bypasses for Pro. Evaluated here at session-START (before createSession),
   // so the not-yet-created session can't wall itself; resuming an existing
   // session sets creatingNewSession=false and skips this gate entirely.
-  //
-  // The legacy users.sessions_used_this_month counter is STILL maintained
-  // below (monthly reset here + increment at createSession) because six client
-  // surfaces still read it; Sprint 12 Build 3 repoints them and retires it.
   if (
     creatingNewSession &&
     mode === "chat" &&
     subscriptionStatus !== "pro"
   ) {
-    // Legacy monthly-counter maintenance (display only, not authorization).
-    if (sessionsMonthStartIso) {
-      const monthStart = new Date(sessionsMonthStartIso);
-      const now = new Date();
-      const isNewMonth =
-        now.getUTCFullYear() > monthStart.getUTCFullYear() ||
-        (now.getUTCFullYear() === monthStart.getUTCFullYear() &&
-          now.getUTCMonth() > monthStart.getUTCMonth());
-      if (isNewMonth) {
-        const firstOfMonthUtc = new Date(
-          Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
-        );
-        await db
-          .from("users")
-          .update({
-            sessions_used_this_month: 0,
-            sessions_month_start: firstOfMonthUtc.toISOString(),
-          })
-          .eq("id", userId);
-        sessionsUsedThisMonth = 0;
-      }
-    }
-
     const entitlement = await getEntitlement(db, authUser.id);
     if (!entitlement.entitled) {
       return Response.json(
@@ -509,18 +476,6 @@ export async function POST(req: NextRequest) {
       userId,
       mode === "onboarding" ? "onboarding" : "chat",
     );
-    // Bump the monthly session counter at session-create, NOT at
-    // SESSION_COMPLETE. This enforces the 5/month gate even if the founder
-    // never reaches a clean wrap-up. Onboarding stays exempt.
-    if (mode === "chat" && subscriptionStatus !== "pro") {
-      await db
-        .from("users")
-        .update({
-          sessions_used_this_month: sessionsUsedThisMonth + 1,
-        })
-        .eq("id", userId);
-      sessionsUsedThisMonth += 1;
-    }
   }
 
   // Summarise-at-next-start (Sprint 12 Build B). When the founder opens a NEW
@@ -803,8 +758,9 @@ export async function POST(req: NextRequest) {
             // onboarding-complete (handled inline) AND session-complete:
             // the model often emits both at onboarding wrap-up, and the
             // SESSION_COMPLETE branch in processSentinels would bump
-            // users.session_count to 1, pushing a new user to "1 of 3"
-            // before their first real chat.
+            // users.session_count and close the onboarding session as a "real"
+            // one, making a brand-new user look like they'd already spent a
+            // free session before their first real chat.
             await processSentinels(
               db,
               {

@@ -5,10 +5,11 @@ import { getEntitlement } from "@/lib/entitlement";
 
 // Sprint 12 — exposes the server-side entitlement seam to the client.
 //
-// This ESTABLISHES the single source of truth on the client side. Build 3
-// repoints the six legacy counter readers (chat/home/settings/AppShell/
-// SettingsModal/push-message) to consume this instead of the deprecated
-// users.sessions_used_this_month. No reader is changed yet.
+// This is the single source of truth on the client side: every free-session
+// display surface (chat/settings/AppShell/SettingsModal/plan/PaywallModal)
+// reads { sessionsUsed, allowance } from here, so what the user sees always
+// equals what the /api/reid (402) gate enforces. The legacy
+// users.sessions_used_this_month counter has been retired as a reader.
 //
 // No `sessionId` exclusion here: the client wants the at-rest "have I used my
 // allowance?" answer for display, not the mid-session self-count variant the

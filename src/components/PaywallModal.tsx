@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { FREE_SESSIONS } from "@/lib/session";
+import { useEntitlement } from "@/components/AuthProvider";
 import { type PlanInterval } from "@/lib/stripe-public";
 import { GlowCard } from "@/components/ui/glow-card";
 import { PricingCards } from "@/components/ui/pricing-cards";
@@ -28,7 +28,9 @@ const COPY: Record<
     proof: "Pro users are 3x more likely to hit their goals in 30 days.",
   },
   session_limit: {
-    headline: `That's your ${FREE_SESSIONS} sessions.`,
+    // headline is overridden in-component with the live allowance; this is the
+    // fallback shown if the entitlement seam hasn't resolved yet.
+    headline: "You've used your free sessions.",
     sub: "Reid Pro removes the limit — and I remember everything.",
     proof: "Most founders upgrade after session 2.",
   },
@@ -49,6 +51,7 @@ function isPaywallContext(v: unknown): v is PaywallContext {
 }
 
 export default function PaywallModal() {
+  const entitlement = useEntitlement();
   const [open, setOpen] = useState(false);
   const [visible, setVisible] = useState(false);
   const [context, setContext] = useState<PaywallContext>("default");
@@ -125,7 +128,17 @@ export default function PaywallModal() {
 
   if (!open) return null;
 
-  const copy = COPY[context];
+  const baseCopy = COPY[context];
+  // session_limit headline reflects the live allowance (display only — the wall
+  // itself is the server 402). Falls back to the static copy until the seam
+  // resolves.
+  const copy =
+    context === "session_limit" && entitlement
+      ? {
+          ...baseCopy,
+          headline: `That's your ${entitlement.allowance} free sessions.`,
+        }
+      : baseCopy;
 
   return (
     <div

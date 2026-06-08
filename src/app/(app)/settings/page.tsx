@@ -2,15 +2,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { useAuth } from "@/components/AuthProvider";
+import { useAuth, useEntitlement } from "@/components/AuthProvider";
 import SettingsCard from "@/components/SettingsCard";
-import { FREE_SESSIONS, signOut } from "@/lib/session";
+import { signOut } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import { isPlausibleFirstName } from "@/lib/reid-summary";
 
-function clampFreeUsage(used: number): number {
+function clampFreeUsage(used: number, allowance: number): number {
   if (used <= 0) return 0;
-  if (used >= FREE_SESSIONS) return FREE_SESSIONS;
+  if (used >= allowance) return allowance;
   return used;
 }
 
@@ -53,6 +53,7 @@ type ResetState = "idle" | "sending" | "sent" | "error";
 export default function SettingsPage() {
   const router = useRouter();
   const { me, loading: authLoading, refresh } = useAuth();
+  const entitlement = useEntitlement();
   const [portalPending, setPortalPending] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
@@ -186,7 +187,8 @@ export default function SettingsPage() {
   }
 
   const isPro = me.subscription_status === "pro";
-  const usedSessions = clampFreeUsage(me.sessions_used_this_month ?? 0);
+  const allowance = entitlement?.allowance ?? 0;
+  const usedSessions = clampFreeUsage(entitlement?.sessionsUsed ?? 0, allowance);
   const joinDate = formatJoinDate(me.created_at);
   const renewDate = formatRenewDate(me.subscription_period_end);
   const rawName = me.name?.trim() || null;
@@ -401,7 +403,7 @@ export default function SettingsPage() {
               >
                 {isPro
                   ? "Unlimited sessions."
-                  : `${usedSessions} of ${FREE_SESSIONS} sessions used this month.`}
+                  : `${usedSessions} of ${allowance} free sessions used.`}
               </p>
               {isPro && renewDate && (
                 <p

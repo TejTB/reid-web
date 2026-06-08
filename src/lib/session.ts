@@ -1,14 +1,8 @@
 "use client";
 import { supabase } from "./supabase";
-import { FREE_SESSIONS } from "./session-shared";
 import type { Goal, GoalEvent, Session, User } from "@/types/db";
 
 const CHAT_SESSION_KEY = "reid:chatSessionId";
-
-/** Free-tier session quota — re-exported from session-shared.ts so the value
- *  can also be read from server code (which can't import this "use client"
- *  module). */
-export { FREE_SESSIONS };
 
 /** The active /chat sessionId, set the first time the user POSTs to /api/reid
  *  from the chat page (server returns it via the X-Reid-Session-Id header).

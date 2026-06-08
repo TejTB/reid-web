@@ -39,7 +39,7 @@ export async function POST(req: Request) {
   const { data: meRow } = await supabase
     .from("users")
     .select(
-      "id, name, onboarding_summary, onboarding_complete, session_count, sessions_used_this_month, push_message, push_message_date",
+      "id, name, onboarding_summary, onboarding_complete, session_count, push_message, push_message_date",
     )
     .eq("auth_id", user.id)
     .maybeSingle();
@@ -90,14 +90,12 @@ export async function POST(req: Request) {
 
   const name = (meRow.name as string | null)?.trim() || "this founder";
   const lifetimeSessionCount = (meRow.session_count as number | null) ?? 0;
-  const usedThisMonth =
-    (meRow.sessions_used_this_month as number | null) ?? 0;
   const onboardingComplete = !!meRow.onboarding_complete;
 
   // Returning = any history of interaction. Onboarding completion is the
-  // strongest signal; either monthly or lifetime session counts confirm.
-  const isReturning =
-    onboardingComplete || usedThisMonth > 0 || lifetimeSessionCount > 0;
+  // strongest signal; the lifetime session count confirms. (Personalization,
+  // not authorization — deliberately off the entitlement seam.)
+  const isReturning = onboardingComplete || lifetimeSessionCount > 0;
 
   const lastSessionEndedAt = lastSession?.ended_at
     ? new Date(lastSession.ended_at as string)

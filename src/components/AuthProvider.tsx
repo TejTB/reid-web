@@ -13,8 +13,8 @@ import { supabase } from "@/lib/supabase";
 import type { User } from "@/types/db";
 
 // Sprint 12 — the server-computed entitlement seam. Mirrors GET /api/entitlement.
-// Build 3 repoints the six legacy counter readers to consume this; for now it
-// is established alongside `me` without changing any existing reader.
+// The free-session display surfaces consume this (via useEntitlement) as the
+// single source of truth, so the number shown always equals the gated value.
 export interface Entitlement {
   sessionsUsed: number;
   allowance: number;
@@ -130,7 +130,7 @@ export function useIsPro(): boolean {
 }
 
 // Sprint 12 — the server-computed entitlement seam. Returns null until the
-// first fetch resolves. Build 3 migrates the legacy counter readers onto this.
+// first fetch resolves. The free-session display surfaces read this.
 export function useEntitlement(): Entitlement | null {
   return useContext(AuthContext).entitlement;
 }
