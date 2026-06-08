@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Eye,
@@ -232,6 +233,39 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {NAV.map((item) => (
             <NavItem key={item.href} {...item} variant="bottom" />
           ))}
+          {/* Mobile-only account entry → /settings, which already carries
+              sign-out, Manage billing (Stripe portal), upgrade and the
+              entitlement-seam session display. A trailing avatar slot rather
+              than a 7th labelled item keeps the bar legible at 390px. Desktop
+              uses the sidebar gear + UserDropdown, so this is not in NAV. */}
+          <Link
+            href="/settings"
+            aria-label="Account"
+            aria-current={pathname === "/settings" ? "page" : undefined}
+            className="relative flex flex-col items-center justify-center flex-1"
+            style={{ minHeight: 44, padding: "8px 4px" }}
+          >
+            <span
+              className="flex items-center justify-center rounded-full"
+              style={{
+                width: 26,
+                height: 26,
+                background: "rgba(255,255,255,0.04)",
+                border: `1px solid ${
+                  pathname === "/settings"
+                    ? "#B91C1C"
+                    : "rgba(255,255,255,0.10)"
+                }`,
+                color: "#F2EDE3",
+                fontFamily: "var(--font-sans), sans-serif",
+                fontSize: 11,
+                fontWeight: 500,
+                transition: "border-color 150ms ease",
+              }}
+            >
+              {initial}
+            </span>
+          </Link>
         </div>
       </nav>
 
