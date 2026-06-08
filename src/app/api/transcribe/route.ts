@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { checkVoiceMinuteLimit } from "@/lib/ratelimit";
+import { voiceCapApplies } from "@/lib/cap-policy";
 
 // Speech-to-text for the native voice loop. The native client records an
 // .m4a clip and POSTs it here as multipart/form-data (field "file"); we hand
@@ -25,23 +26,54 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // Burst protection on the dedicated VOICE bucket (30/min/user), shared only
-  // with /api/tts — NOT the conversational /api/reid key. Transcription is the
-  // first hop of every spoken turn; keeping it off the chat budget means a
-  // voice turn's audio hops can't 429 the founder's next typed message.
-  const limit = await checkVoiceMinuteLimit(authed.user.id);
-  if (!limit.allowed) {
-    return NextResponse.json(
-      { error: "rate_limited" },
-      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
-    );
-  }
-
   let form: FormData;
   try {
     form = await req.formData();
   } catch {
     return NextResponse.json({ error: "invalid form data" }, { status: 400 });
+  }
+
+  // Burst protection on the dedicated VOICE bucket (30/min/user), shared only
+  // with /api/tts — NOT the conversational /api/reid key. Transcription is the
+  // first hop of every spoken turn; keeping it off the chat budget means a
+  // voice turn's audio hops can't 429 the founder's next typed message.
+  //
+  // Pro and onboarding sessions are exempt (parity with /api/reid + /api/tts).
+  // Server-derived: subscription_status and the session's mode are read from the
+  // real rows under RLS (the request-scoped client only sees the caller's own
+  // rows). A missing / unparseable / unowned sessionId leaves sessionMode null,
+  // which CAPS — never a bypass.
+  const sessionIdRaw = form.get("sessionId");
+  const sessionId =
+    typeof sessionIdRaw === "string" && sessionIdRaw.length > 0
+      ? sessionIdRaw
+      : null;
+
+  const { data: meRow } = await authed.supabase
+    .from("users")
+    .select("subscription_status")
+    .eq("auth_id", authed.user.id)
+    .maybeSingle();
+  const isPro = (meRow?.subscription_status as string | null) === "pro";
+
+  let sessionMode: string | null = null;
+  if (sessionId) {
+    const { data: sessionRow } = await authed.supabase
+      .from("sessions")
+      .select("mode")
+      .eq("id", sessionId)
+      .maybeSingle();
+    sessionMode = (sessionRow?.mode as string | null) ?? null;
+  }
+
+  if (voiceCapApplies({ isPro, sessionMode })) {
+    const limit = await checkVoiceMinuteLimit(authed.user.id);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: "rate_limited" },
+        { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
+      );
+    }
   }
 
   const file = form.get("file");

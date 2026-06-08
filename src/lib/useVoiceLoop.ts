@@ -239,6 +239,11 @@ export function useVoiceLoop(opts: UseVoiceLoopOptions): UseVoiceLoopReturn {
         const form = new FormData();
         // TRUTHFUL filename + type so Whisper gets the right format hint.
         form.append("file", blob, `speech.${mime.ext}`);
+        // Send the active session id so the server can exempt onboarding voice
+        // turns from the burst cap (it reads the session's mode under RLS).
+        // Absent → the server caps (never a bypass).
+        const sid = getSessionId();
+        if (sid) form.append("sessionId", sid);
         const res = await fetch("/api/transcribe", {
           method: "POST",
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -291,7 +296,7 @@ export function useVoiceLoop(opts: UseVoiceLoopOptions): UseVoiceLoopReturn {
       // so the orb's pulse onset is truthful with no silent gap.
       void speak(outcome.replyText);
     },
-    [getAccessToken, runReidTurn, speak, stopTracks],
+    [getAccessToken, getSessionId, runReidTurn, speak, stopTracks],
   );
 
   // ---- recording ----------------------------------------------------------

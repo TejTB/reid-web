@@ -26,6 +26,7 @@ import {
 } from "@/lib/session-server";
 import { reidRequestSchema } from "@/lib/validation";
 import { checkDailyMessageLimit, checkReidMinuteLimit } from "@/lib/ratelimit";
+import { messageCapsApply } from "@/lib/cap-policy";
 import { getEntitlement } from "@/lib/entitlement";
 
 // ----- SentinelStripper ---------------------------------------------------
@@ -379,7 +380,7 @@ export async function POST(req: NextRequest) {
   // can decide whether to rate-limit.
   const { data: meRow } = await db
     .from("users")
-    .select("id, subscription_status, name")
+    .select("id, subscription_status, name, onboarding_complete")
     .eq("auth_id", authUser.id)
     .maybeSingle();
   if (!meRow?.id) {
@@ -388,6 +389,8 @@ export async function POST(req: NextRequest) {
   const userId = meRow.id as string;
   const subscriptionStatus =
     (meRow.subscription_status as string | null) ?? "free";
+  const onboardingComplete =
+    (meRow.onboarding_complete as boolean | null) ?? false;
   const existingName = (meRow.name as string | null) ?? null;
 
   if (!existingName) {
@@ -439,10 +442,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Pro is exempt from BOTH the daily quota and the per-minute burst limiter.
-  // (Voice turns hit /api/transcribe + /api/reid, which share the same minute
-  // key, so a non-exempt pro tester would cap out at ~4 turns/min.)
-  if (subscriptionStatus !== "pro") {
+  // Message caps (daily quota + per-minute burst). Pro and ACTIVE onboarding are
+  // exempt — see messageCapsApply. The onboarding exemption is server-gated
+  // (users.onboarding_complete) AND-ed with the request mode, so neither a
+  // completed user faking mode:"onboarding" nor an abandoned-onboarding user on
+  // mode:"chat" can slip a cap. (Voice turns hit /api/transcribe + /api/reid,
+  // which share the same minute key, so a non-exempt pro would cap at ~4/min.)
+  if (
+    messageCapsApply({
+      isPro: subscriptionStatus === "pro",
+      onboardingComplete,
+      mode,
+    })
+  ) {
     const rate = await checkDailyMessageLimit(userId);
     if (!rate.allowed) {
       return Response.json(
