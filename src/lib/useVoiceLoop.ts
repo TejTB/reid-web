@@ -175,7 +175,7 @@ export function useVoiceLoop(opts: UseVoiceLoopOptions): UseVoiceLoopReturn {
       const ac = new AbortController();
       ttsAbortRef.current = ac;
       // ALWAYS request full audio. The wall is /api/reid 402 (primary) and
-      // /api/tts 403 (backstop) — we never route non-entitled users through
+      // /api/tts 402 (backstop) — we never route non-entitled users through
       // the preview taste, which would mask a 402 failure. sessionId is read
       // live so /api/tts excludes the in-progress session from the count.
       const { result, handle } = await fetchAndPlay({
@@ -206,7 +206,7 @@ export function useVoiceLoop(opts: UseVoiceLoopOptions): UseVoiceLoopReturn {
       ttsAbortRef.current = null;
       ttsHandleRef.current = null;
       if (result.reason === "forbidden") {
-        // 403 backstop — open the paywall and return to idle.
+        // 402 backstop — open the paywall and return to idle.
         if (typeof window !== "undefined") {
           window.dispatchEvent(
             new CustomEvent("reid:open-paywall", {

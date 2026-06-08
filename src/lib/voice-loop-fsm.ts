@@ -44,7 +44,7 @@ export type VoiceEvent =
   | { type: "REPLY_READY" }
   // TTS audio finished (or its element errored — treated as ended)
   | { type: "PLAYBACK_ENDED" }
-  // a gate fired (reid 402 / tts 403). Side effect (open paywall) is the
+  // a gate fired (reid 402 / tts 402). Side effect (open paywall) is the
   // hook's job; the FSM just returns to idle so the orb never hangs.
   | { type: "WALL" }
   // voice mode dismissed or a hard reset — always returns to idle
@@ -112,7 +112,7 @@ export function voiceLoopReducer(
 
     case "speaking":
       if (event.type === "PLAYBACK_ENDED") return idle();
-      // 403 backstop can fire while fetching playback audio.
+      // 402 backstop can fire while fetching playback audio.
       if (event.type === "WALL") return idle();
       // CHANGE #2: tap-record while Reid is speaking → ignored (no barge-in).
       if (event.type === "START") return state;

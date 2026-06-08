@@ -1,8 +1,8 @@
-// Pure cap-exemption policy — decides who is exempt from the message caps
-// (/api/reid: daily + per-minute) and the voice burst cap (/api/transcribe).
-// Dependency-free on purpose so the decision is unit-testable without Redis or
-// Supabase. The exemptions here are abuse-prevention, NOT authorization — the
-// session wall is always the server 402 via getEntitlement.
+// Pure request-gating policy — the rate-cap exemptions (/api/reid message caps
+// and /api/transcribe voice cap) and the /api/tts voice entitlement wall.
+// Dependency-free on purpose so each decision is unit-testable without Redis or
+// Supabase. The cap exemptions are abuse-prevention, NOT authorization — the
+// session/voice wall is always the server 402 via getEntitlement.
 
 /** Whether the /api/reid daily + per-minute message caps apply to this request.
  *
@@ -41,4 +41,18 @@ export function voiceCapApplies(opts: {
 }): boolean {
   if (opts.isPro) return false;
   return opts.sessionMode !== "onboarding";
+}
+
+/** The /api/tts voice entitlement wall. A `preview` taste is ALWAYS served (its
+ *  cost is absorbed by cache), so an exhausted free user still hears the nudge;
+ *  otherwise an unentitled caller is walled with 402 — the SAME status as the
+ *  /api/reid session wall, so the client paywall fires identically (the client
+ *  branches on status, not the body string). Returns the status to send, or
+ *  null to proceed to synthesis. */
+export function ttsWallStatus(opts: {
+  preview: boolean;
+  entitled: boolean;
+}): 402 | null {
+  if (!opts.preview && !opts.entitled) return 402;
+  return null;
 }

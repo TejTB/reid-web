@@ -6,6 +6,7 @@ import { Redis } from "@upstash/redis";
 import { z } from "zod";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { getEntitlement } from "@/lib/entitlement";
+import { ttsWallStatus } from "@/lib/cap-policy";
 import { checkVoiceMinuteLimit } from "@/lib/ratelimit";
 
 // Reid's ElevenLabs voice. Pinned to a single id so the brand voice never
@@ -95,8 +96,18 @@ export async function POST(req: NextRequest) {
   const entitlement = await getEntitlement(db, user.id, {
     excludeSessionId: sessionId,
   });
-  if (!preview && !entitlement.entitled) {
-    return NextResponse.json({ error: "reid_pro_required" }, { status: 403 });
+  const wallStatus = ttsWallStatus({
+    preview,
+    entitled: entitlement.entitled,
+  });
+  if (wallStatus) {
+    // 402 matches the /api/reid session wall so the client paywall fires
+    // identically. Body stays route-descriptive (reid_pro_required); the client
+    // branches on status, not the string.
+    return NextResponse.json(
+      { error: "reid_pro_required" },
+      { status: wallStatus },
+    );
   }
 
   // Burst protection on the dedicated VOICE bucket (30/min/user), shared only

@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { messageCapsApply, voiceCapApplies } from "../cap-policy.ts";
+import {
+  messageCapsApply,
+  voiceCapApplies,
+  ttsWallStatus,
+} from "../cap-policy.ts";
 
 // ---- messageCapsApply (/api/reid daily + per-minute) -----------------------
 
@@ -64,4 +68,22 @@ test("chat session ⇒ voice cap applies", () => {
 
 test("missing/unresolved sessionId (sessionMode null) ⇒ voice cap APPLIES (never bypass)", () => {
   assert.equal(voiceCapApplies({ isPro: false, sessionMode: null }), true);
+});
+
+// ---- ttsWallStatus (/api/tts entitlement wall) -----------------------------
+
+test("non-preview + not entitled ⇒ wall with 402 (NOT 403)", () => {
+  const status = ttsWallStatus({ preview: false, entitled: false });
+  assert.equal(status, 402);
+  // Guard the regression the unification fixes: the voice wall must never be 403
+  // again, or the client (which branches on 402) stops firing the paywall.
+  assert.notEqual(status, 403);
+});
+
+test("preview taste is served to an exhausted (non-entitled) user (no wall)", () => {
+  assert.equal(ttsWallStatus({ preview: true, entitled: false }), null);
+});
+
+test("entitled user is not walled (full audio)", () => {
+  assert.equal(ttsWallStatus({ preview: false, entitled: true }), null);
 });

@@ -3,7 +3,7 @@ import { FREE_SESSION_ALLOWANCE } from "./session-shared.ts";
 
 // Sprint 12 — the SINGLE server-side source of truth for session entitlement.
 //
-// Both /api/reid (the 402 session-start wall) and /api/tts (the 403 full-voice
+// Both /api/reid (the 402 session-start wall) and /api/tts (the 402 full-voice
 // gate) consume this identical check. There is no client-flag authorization
 // path: a caller is entitled iff they are Pro OR within the free allowance.
 //

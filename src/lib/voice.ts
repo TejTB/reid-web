@@ -193,7 +193,7 @@ export async function fetchAndPlay(
     };
   }
 
-  if (res.status === 403) {
+  if (res.status === 402) {
     return { result: { ok: false, reason: "forbidden" }, handle: null };
   }
   if (!res.ok) {

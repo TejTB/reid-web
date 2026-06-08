@@ -36,11 +36,11 @@ test("transcribing with no speech returns to idle (not thinking)", () => {
   assert.deepEqual(s, S("idle"));
 });
 
-// ---- paywall (402/403) ----------------------------------------------------
+// ---- paywall (402) ---------------------------------------------------------
 test("WALL from thinking → idle (402 session-start wall)", () => {
   assert.deepEqual(voiceLoopReducer(S("thinking"), { type: "WALL" }), S("idle"));
 });
-test("WALL from speaking → idle (403 tts backstop while fetching audio)", () => {
+test("WALL from speaking → idle (402 tts backstop while fetching audio)", () => {
   assert.deepEqual(voiceLoopReducer(S("speaking"), { type: "WALL" }), S("idle"));
 });
 
