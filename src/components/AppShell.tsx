@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import LogoMark from "./LogoMark";
 import NavItem from "./NavItem";
+import SessionsSidebar from "./SessionsSidebar";
 import SettingsModal from "./SettingsModal";
 import PaywallModal from "./PaywallModal";
 import { UserDropdown } from "./UserDropdown";
@@ -168,6 +169,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <NavItem key={item.href} {...item} variant="sidebar" />
           ))}
         </nav>
+
+        {/* "What Reid knows" — summarised-session history (Sprint 13 Build 2).
+            Desktop only: lives inside this hidden-md:flex aside. */}
+        <SessionsSidebar />
 
         {/* Stats strip — JARVIS status panel for the founder's pace. */}
         {name && (
