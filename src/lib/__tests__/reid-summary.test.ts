@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseSummaryJson,
   qualifiesForSummary,
+  synthesizeOnboardingGoals,
 } from "../reid-summary.ts";
 
 // ---------------------------------------------------------------------------
@@ -116,4 +117,72 @@ test("qualifiesForSummary is false for thin sessions (< 4 messages)", () => {
     qualifiesForSummary({ summary: null, message_count: 0 }),
     false,
   );
+});
+
+// ---------------------------------------------------------------------------
+// synthesizeOnboardingGoals — the force-complete goal seed (Sprint 13). The
+// hard-cap path must NEVER produce an empty goals array again: that's what
+// left force-completed founders with an empty /home.
+
+test("synthesizes exactly one primary, binary goal from the first commitment", () => {
+  const goals = synthesizeOnboardingGoals({
+    summary: "Founder is building a B2B analytics tool, stuck on pricing.",
+    commitments: ["Ship the pricing page", "Email three prospects"],
+    key_points: ["Solo founder", "Pre-revenue"],
+  });
+  assert.equal(goals.length, 1);
+  assert.deepEqual(goals[0], {
+    title: "Ship the pricing page",
+    description: "Founder is building a B2B analytics tool, stuck on pricing.",
+    target_value: 1,
+    unit: "done",
+    unit_prefix: false,
+    is_primary: true,
+  });
+});
+
+test("skips blank commitments and falls back to the default title when none are usable", () => {
+  const fromBlank = synthesizeOnboardingGoals({
+    summary: "Thin session.",
+    commitments: ["   ", ""],
+    key_points: [],
+  });
+  assert.equal(fromBlank[0].title, "Lock in your first win");
+
+  const fromEmpty = synthesizeOnboardingGoals({
+    summary: "Thin session.",
+    commitments: [],
+    key_points: [],
+  });
+  assert.equal(fromEmpty[0].title, "Lock in your first win");
+  assert.equal(fromEmpty[0].is_primary, true);
+  assert.equal(fromEmpty[0].target_value, 1);
+});
+
+test("caps a runaway commitment title at 80 chars", () => {
+  const long = "Ship ".repeat(40);
+  const goals = synthesizeOnboardingGoals({
+    summary: "s",
+    commitments: [long],
+    key_points: [],
+  });
+  assert.equal(goals[0].title.length, 80);
+});
+
+test("the fallback summary sentence never leaks into the goal description", () => {
+  const goals = synthesizeOnboardingGoals({
+    summary: "Session recorded — no summary could be generated.",
+    commitments: ["Do the thing"],
+    key_points: [],
+  });
+  assert.equal(goals[0].description, null);
+});
+
+test("never returns an empty array — the seed path must always run", () => {
+  const goals = synthesizeOnboardingGoals({
+    summary: "",
+    commitments: [],
+    key_points: [],
+  });
+  assert.equal(goals.length, 1);
 });

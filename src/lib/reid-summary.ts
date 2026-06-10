@@ -26,7 +26,10 @@
 // `heard`/`opportunity` are populated only when the legacy block is detected.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getMessagesForSession } from "./session-server.ts";
+import {
+  getMessagesForSession,
+  type OnboardingGoalInput,
+} from "./session-server.ts";
 
 export const ONBOARDING_SENTINEL = "[ONBOARDING_COMPLETE]";
 
@@ -313,6 +316,34 @@ export async function generateSessionSummary(
   } catch {
     return { summary: SUMMARY_FALLBACK, commitments: [], key_points: [] };
   }
+}
+
+/** Sprint 13 — synthesises the goal seed for the FORCE-complete path. When
+ *  onboarding hits the hard cap without the model emitting
+ *  [ONBOARDING_COMPLETE], the server generates the summary but historically
+ *  passed `goals: []`, so `createGoalsFromOnboarding` never fired and a
+ *  force-completed founder landed on an empty /home. This derives ONE minimal,
+ *  binary goal from the synthesised close so the seed path always runs: the
+ *  founder's first stated commitment becomes the title (it's already "a
+ *  specific thing the founder said they would DO"); with no commitments we
+ *  fall back to a blunt default. Pure + exported for unit testing. */
+export function synthesizeOnboardingGoals(
+  result: SessionSummaryResult,
+): OnboardingGoalInput[] {
+  const commitment = result.commitments
+    .map((c) => c.trim())
+    .find((c) => c.length > 0);
+  const title = (commitment ?? "Lock in your first win").slice(0, 80);
+  return [
+    {
+      title,
+      description: result.summary === SUMMARY_FALLBACK ? null : result.summary,
+      target_value: 1,
+      unit: "done",
+      unit_prefix: false,
+      is_primary: true,
+    },
+  ];
 }
 
 /** Decides whether a prior session should be summarised at next-session start.

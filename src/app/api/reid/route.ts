@@ -7,6 +7,7 @@ import {
   summarisePriorSession,
   qualifiesForSummary,
   generateSessionSummary,
+  synthesizeOnboardingGoals,
 } from "@/lib/reid-summary";
 import { getReidContext } from "@/lib/reid-context";
 import {
@@ -804,10 +805,13 @@ export async function POST(req: NextRequest) {
               ...messages.map((m) => ({ role: m.role, content: m.content })),
               { role: "assistant" as const, content: cleanedAssistantText },
             ]);
+            // Sprint 13: seed a minimal goal from the synthesised close so a
+            // force-completed founder never lands on an empty /home (the
+            // goals: [] here used to skip createGoalsFromOnboarding entirely).
             onboardingClose = {
               summary: generated.summary,
               task: null,
-              goals: [],
+              goals: synthesizeOnboardingGoals(generated),
             };
           }
 
