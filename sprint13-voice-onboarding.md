@@ -50,6 +50,19 @@ no component recreation (rule 7) · audio-grep zero on changed files ·
 gates per build: Impeccable → secret-scanner → `tsc --noEmit` → `npm test` →
 audio-grep → git-commit-smart; Playwright smoke; chrome-devtools 60fps on orb surfaces.
 
+## Build 1 — Theo's iPhone smoke checklist (gate to Build 2)
+1. Preview deploy (Theo). Fresh-eyes load of /onboarding on iPhone Safari.
+2. Tap orb → **Reid speaks first** (cold open; NO mic prompt on this tap).
+3. Tap again → mic permission INSIDE that gesture → record → Reid replies by voice.
+4. Complete onboarding end-to-end by voice → final line plays out fully → lands on **/home** with goals + task populated.
+5. Mic-deny path: deny permission once → seamless drop to text in the same shell.
+6. **Mid-speech interruption (added at checkpoint):** while Reid is speaking, lock the phone /
+   app-switch, return, tap again — must recover cleanly (AudioContext `ctx.state === 'interrupted'`
+   resume path + ReidWebOrb `webglcontextlost` restore), no FSM hang in `speaking`/`thinking`.
+7. **Full-funnel entry (added at checkpoint):** fresh signup ON the phone, tap the email-confirm
+   link through `/auth/callback` — the session must survive into /onboarding and reach the orb
+   (cross-browser auth handoff is a known historical bite).
+
 ## Phase 2 — bank & handoff
 Full gate pass on tip → push (push ≠ deploy) → `SPRINT13-HANDOFF.md` → STOP.
 Theo merges, deploys, device-smokes (voice onboarding E2E, history click-through, gap fixes).
