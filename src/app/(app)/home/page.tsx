@@ -49,6 +49,18 @@ interface TaskRow {
   text: string;
   completedAt: string | null;
   createdAt: string | null;
+  /** Where the row lives: a real public.tasks row (session-assigned) or the
+   *  legacy users.onboarding_task fallback. Decides the toggle endpoint. */
+  source: "db" | "legacy";
+}
+
+/** The newest public.tasks row, as fetched for Today's Task. */
+interface DbTaskRow {
+  id: string;
+  description: string;
+  completed: boolean;
+  completed_at: string | null;
+  created_at: string | null;
 }
 
 // Helper kept outside HomePage so the impure Date.now() call doesn't run
@@ -67,6 +79,11 @@ export default function HomePage() {
   const router = useRouter();
   const { me, session, loading } = useAuth();
   const [taskOverride, setTaskOverride] = useState<TaskRow | null>(null);
+  // Sprint 13 Build 4 — Today's Task reads public.tasks (session-assigned
+  // rows) and falls back to the legacy users.onboarding_task only when no
+  // rows exist (fresh founders straight out of onboarding). "loading" keeps
+  // the legacy base until the fetch resolves so the card never flashes empty.
+  const [dbTask, setDbTask] = useState<DbTaskRow | null | "loading">("loading");
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [pushLoading, setPushLoading] = useState(true);
   const [primaryGoal, setPrimaryGoal] = useState<Goal | null>(null);
@@ -123,6 +140,18 @@ export default function HomePage() {
         .maybeSingle();
       if (!cancelled) setPrimaryGoal((data as Goal | null) ?? null);
     })();
+    (async () => {
+      // Newest task row regardless of completion: a checked task stays
+      // visible (same behaviour the legacy onboarding task had) rather than
+      // vanishing the moment it's done.
+      const { data } = await supabase
+        .from("tasks")
+        .select("id, description, completed, completed_at, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled) setDbTask((data as DbTaskRow | null) ?? null);
+    })();
     return () => {
       cancelled = true;
     };
@@ -132,6 +161,23 @@ export default function HomePage() {
 
   const baseTasks: TaskRow[] = useMemo(() => {
     if (!user) return [];
+    // Real session-assigned task wins. While the fetch is in flight the
+    // legacy base below renders, so the card never flashes empty.
+    if (dbTask !== "loading" && dbTask !== null) {
+      const text = dbTask.description?.trim();
+      if (text) {
+        return [
+          {
+            id: dbTask.id,
+            text,
+            completedAt: dbTask.completed_at,
+            createdAt: dbTask.created_at,
+            source: "db" as const,
+          },
+        ];
+      }
+    }
+    // Legacy fallback: the onboarding task, for founders with no tasks rows.
     const task = user.onboarding_task?.trim();
     if (!task) return [];
     return [
@@ -140,9 +186,10 @@ export default function HomePage() {
         text: task,
         completedAt: user.onboarding_task_completed_at ?? null,
         createdAt: null,
+        source: "legacy" as const,
       },
     ];
-  }, [user]);
+  }, [user, dbTask]);
 
   const tasks: TaskRow[] = useMemo(() => {
     if (!taskOverride) return baseTasks;
@@ -167,7 +214,13 @@ export default function HomePage() {
     }
 
     try {
-      const res = await fetch(`/api/tasks/${task.id}/complete`, {
+      // public.tasks rows toggle via the item endpoint; the legacy
+      // onboarding task keeps its user-id-keyed route.
+      const endpoint =
+        task.source === "db"
+          ? `/api/tasks/item/${task.id}/complete`
+          : `/api/tasks/${task.id}/complete`;
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

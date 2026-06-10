@@ -25,6 +25,7 @@ import type {
   ObservationCategory,
 } from "@/types/db";
 import { observationBadge } from "@/lib/observation-badge";
+import { useMounted } from "@/lib/use-mounted";
 
 // Reid design tokens — colocated so the component is a single drop-in. Any
 // change to the system itself lives in tailwind config + globals.css; these
@@ -119,16 +120,12 @@ export function FullScreenCard({ context, onClose }: FullScreenCardProps) {
   const previousFocus = useRef<HTMLElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const [mounted, setMounted] = useState(false);
-
-  // Portal target. SSR-safe: don't try to read document until after mount.
+  // Portal target gate. SSR-safe: don't read document until on the client.
   // The overlay MUST live on document.body so position:fixed escapes the
   // .page-enter animation's transform — that animation establishes a
   // containing block which would otherwise trap the overlay inside the
   // main content column (sidebar visible behind it).
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useMounted();
 
   const open = context !== null;
 

@@ -308,19 +308,23 @@ export default function ObservationsPage() {
             </button>
           </div>
         ) : observations.length === 0 ? (
+          // Empty-state primitives unified with /goals' GoalsEmptyState
+          // (Sprint 13 Build 4): serif italic 24px, #7A90A8, 440px measure,
+          // fade-up entrance. The copy stays quiet on purpose — observations
+          // accrue passively, so no CTA.
           <div
-            className="flex flex-col items-center text-center"
-            style={{ paddingTop: 96, paddingBottom: 80, gap: 10 }}
+            className="flex flex-col items-center text-center animate-fade-up"
+            style={{ paddingTop: 96, paddingBottom: 80, gap: 24 }}
           >
             <p
-              className="font-serif italic"
+              className="font-serif italic [text-wrap:pretty]"
               style={{
-                fontSize: 22,
+                fontSize: 24,
                 fontWeight: 400,
                 color: "#7A90A8",
                 letterSpacing: "-0.01em",
                 lineHeight: 1.35,
-                maxWidth: 360,
+                maxWidth: 440,
               }}
             >
               Reid&apos;s still watching.

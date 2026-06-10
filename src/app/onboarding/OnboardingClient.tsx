@@ -1,11 +1,5 @@
 "use client";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { MessageSquare } from "lucide-react";
@@ -26,6 +20,7 @@ import {
   type TtsPlaybackHandle,
 } from "@/lib/voice";
 import { supabase } from "@/lib/supabase";
+import { useMounted } from "@/lib/use-mounted";
 import {
   deriveOrbStatus,
   shouldRedirectAfterCompletion,
@@ -104,17 +99,6 @@ const ORB_TAP_LABEL: Record<string, string> = {
 };
 
 type InputMode = "voice" | "text";
-
-// Hydration-safe client detection: false on the server snapshot, true on the
-// client, with no setState-in-effect cascade.
-const emptySubscribe = () => () => {};
-function useMounted(): boolean {
-  return useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false,
-  );
-}
 
 export default function OnboardingClient() {
   const router = useRouter();

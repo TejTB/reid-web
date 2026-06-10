@@ -14,6 +14,7 @@ import RateLimitNotice from "@/components/RateLimitNotice";
 import { getChatSessionId, setChatSessionId } from "@/lib/session";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
 import { useVoiceLoop, type ReidTurnOutcome } from "@/lib/useVoiceLoop";
+import { useMounted } from "@/lib/use-mounted";
 import { supabase } from "@/lib/supabase";
 import { PromptInputBox } from "@/components/ui/prompt-input-box";
 import { GlowCard } from "@/components/ui/glow-card";
@@ -566,6 +567,11 @@ function ChatPageInner() {
     getSessionId: () => sessionIdRef.current,
     getAccessToken,
   });
+  // Hydration gate for every render branch keyed on voice.isSupported —
+  // detectVoiceSupport() is false on the server and true on capable clients,
+  // so ungated branches mismatch on hydration (Sprint 13 Build 4 fix).
+  const mounted = useMounted();
+  const voiceSupported = mounted && voice.isSupported;
 
   // Hard-reset the loop whenever voice mode is dismissed (also covers leaving
   // /chat — useVoiceLoop runs its own unmount teardown). cancel() aborts any
@@ -769,7 +775,7 @@ function ChatPageInner() {
               the circular ReidMark to enter voice (Pro-gated via handleMicClick,
               which opens the paywall for free users), a chat bubble to return to
               text. Hidden in text mode when voice isn't supported here. */}
-          {(voiceMode || voice.isSupported) && (
+          {(voiceMode || voiceSupported) && (
             <button
               type="button"
               onClick={voiceMode ? exitVoiceMode : handleMicClick}
@@ -991,9 +997,9 @@ function ChatPageInner() {
                 isLoading={isStreaming || !loaded}
                 placeholder="What's the situation?"
                 initialValue={prefillFromUrl}
-                onMicClick={voice.isSupported ? handleMicClick : undefined}
+                onMicClick={voiceSupported ? handleMicClick : undefined}
                 inlineBadge={
-                  !isPro && voice.isSupported ? (
+                  !isPro && voiceSupported ? (
                     <ShiningText text="PRO" />
                   ) : undefined
                 }
