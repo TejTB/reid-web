@@ -82,7 +82,7 @@ const GlowCard: React.FC<GlowCardProps> = ({
       "--radius": "14",
       "--border": "3",
       "--backdrop": "hsl(0 0% 8% / 0.98)",
-      "--backup-border": "rgba(255,255,255,0.06)",
+      "--backup-border": "rgba(255,255,255,0.08)",
       "--size": "300",
       "--outer": "1",
       "--bg-spot-opacity": "0.15",
@@ -119,7 +119,7 @@ const GlowCard: React.FC<GlowCardProps> = ({
       ref={cardRef}
       data-glow
       style={getInlineStyles()}
-      className={`${getSizeClasses()} ${!customSize ? "aspect-[3/4]" : ""} rounded-2xl relative grid grid-rows-[1fr_auto] shadow-[0_1rem_2rem_-1rem_black] p-4 gap-4 backdrop-blur-[5px] ${className}`}
+      className={`${getSizeClasses()} ${!customSize ? "aspect-[3/4]" : ""} rounded-2xl relative grid grid-rows-[1fr_auto] shadow-[0_1rem_2rem_-1rem_black] p-4 gap-4 backdrop-blur-[24px] ${className}`}
     >
       <div ref={innerRef} data-glow></div>
       {children}
