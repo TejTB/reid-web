@@ -4,6 +4,7 @@ import {
   parseSummaryJson,
   qualifiesForSummary,
   synthesizeOnboardingGoals,
+  isPlausibleFirstName,
 } from "../reid-summary.ts";
 
 // ---------------------------------------------------------------------------
@@ -185,4 +186,32 @@ test("never returns an empty array — the seed path must always run", () => {
     key_points: [],
   });
   assert.equal(goals.length, 1);
+});
+
+// ---- isPlausibleFirstName: placeholder pseudo-names (B1.6) ------------------
+// Prod evidence: the model emitted [NAME_CAPTURED] name="Unknown" for users
+// whose signup name was lost, and "Unknown" passed the plausibility check and
+// was written to users.name (phaseb-p1/p2, Sprint 13 audit).
+
+test("placeholder pseudo-names are not plausible first names", () => {
+  for (const bad of [
+    "Unknown",
+    "unknown",
+    "Founder",
+    "User",
+    "Anonymous",
+    "Anon",
+    "Unnamed",
+    "None",
+    "Nobody",
+    "Someone",
+  ]) {
+    assert.equal(isPlausibleFirstName(bad), false, bad);
+  }
+});
+
+test("real names still pass the plausibility check", () => {
+  for (const good of ["Theo", "Maya", "Noah", "O'Brien", "Mary-Jane"]) {
+    assert.equal(isPlausibleFirstName(good), true, good);
+  }
 });

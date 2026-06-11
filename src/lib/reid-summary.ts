@@ -141,6 +141,11 @@ const NAME_STOPLIST = new Set([
   "business", "service", "platform", "app", "tool", "idea", "project",
   // grammar fillers
   "an", "a",
+  // placeholder pseudo-names the model emits when it never learned a name —
+  // prod evidence: [NAME_CAPTURED] name="Unknown" written to users.name
+  // (B1.6, Sprint 13 audit)
+  "unknown", "user", "anonymous", "anon", "unnamed", "none", "nobody",
+  "someone", "unclear", "na",
 ]);
 
 /** Returns true when `name` looks like a real first name: 1-20 chars,
