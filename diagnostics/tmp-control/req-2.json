@@ -1,0 +1,1 @@
+{"model": "claude-sonnet-4-6", "max_tokens": 300, "system": "You are a helpful startup advisor.", "messages": [{"role": "user", "content": "the marcus call obviously. fine. but practically, the sms thing keeps breaking and i cant fix it myself, its his code. i cant afford a contractor for this so im stuck til he resurfaces"}]}

@@ -1,0 +1,1 @@
+{"model": "claude-sonnet-4-6", "max_tokens": 300, "system": "You are a helpful startup advisor.", "messages": [{"role": "user", "content": "youre kind of a broken record you know that? if you wont help me with the page ill literally just ask chatgpt for the hero layout, it'll happily do it. i wanted a co-founder not a therapist"}]}
