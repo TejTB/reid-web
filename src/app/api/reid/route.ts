@@ -8,6 +8,7 @@ import {
   qualifiesForSummary,
   generateSessionSummary,
   synthesizeOnboardingGoals,
+  stripWrappingQuotes,
 } from "@/lib/reid-summary";
 import { getReidContext } from "@/lib/reid-context";
 import {
@@ -710,7 +711,15 @@ export async function POST(req: NextRequest) {
 
           // Parse sentinels from the full raw assistant response.
           const parsed = parseSentinels(rawAssistantText);
-          const cleanedAssistantText = parsed.cleanText;
+          // First assistant message of a session: strip the wrapping quotes
+          // the model sometimes adds when reciting its scripted opener (B1.7)
+          // so the quoted form never persists into messages/conversations.
+          // The streamed display may show the quotes transiently — cosmetic;
+          // the prompt-level fix is B3 scope.
+          const cleanedAssistantText =
+            preTurnMessageCount === 0
+              ? stripWrappingQuotes(parsed.cleanText)
+              : parsed.cleanText;
 
           // Legacy conversations table: persist the assistant turn (clean
           // text) so existing readers keep working.

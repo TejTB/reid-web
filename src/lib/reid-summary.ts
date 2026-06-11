@@ -167,6 +167,25 @@ function normaliseFirstName(raw: string): string {
   return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
 }
 
+/** Strips ONE fully-wrapping straight/smart quote pair. The model sometimes
+ *  recites its scripted opener inside literal quotes despite the "No quotes"
+ *  rule (5/20 recent prod openers, Sprint 13 audit — B1.7). Inner quotes and
+ *  unbalanced wrapping are left alone. */
+export function stripWrappingQuotes(s: string): string {
+  const t = s.trim();
+  const pairs: Array<[string, string]> = [
+    ['"', '"'],
+    ["“", "”"], // “ ”
+    ["'", "'"],
+  ];
+  for (const [open, close] of pairs) {
+    if (t.length >= 2 && t.startsWith(open) && t.endsWith(close)) {
+      return t.slice(open.length, t.length - close.length).trim();
+    }
+  }
+  return t;
+}
+
 export function extractName(input: string | Array<{ role: string; content: string }>): string | null {
   const messages = typeof input === "string"
     ? [{ role: "user" as const, content: input }]

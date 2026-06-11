@@ -17,6 +17,7 @@
 import type { NextRequest } from "next/server";
 import { anthropic, REID_MODEL } from "@/lib/anthropic";
 import { getAuthedUser } from "@/lib/supabase-auth";
+import { stripWrappingQuotes } from "@/lib/reid-summary";
 
 interface TaskRow {
   content: string;
@@ -162,54 +163,36 @@ export async function POST(req: NextRequest): Promise<Response> {
     onboardingSummary,
   });
 
-  let aStream: ReturnType<typeof anthropic.messages.stream>;
+  // Buffer the whole line instead of streaming deltas (B1.7): the opener is
+  // a single <=80-token sentence, so buffering costs well under a second and
+  // lets us strip the wrapping quotes the model sometimes adds despite the
+  // "No quotes" rule (5/20 recent prod openers were quote-wrapped). The
+  // client reads the body the same way either way; failures still collapse
+  // to 204 → static empty-state fallback.
+  let line = "";
   try {
-    aStream = anthropic.messages.stream({
-      model: REID_MODEL,
-      max_tokens: 80,
-      system: systemPrompt,
-      messages: [{ role: "user", content: "Begin." }],
-    });
+    const finalMsg = await anthropic.messages
+      .stream({
+        model: REID_MODEL,
+        max_tokens: 80,
+        system: systemPrompt,
+        messages: [{ role: "user", content: "Begin." }],
+      })
+      .finalMessage();
+    line = finalMsg.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
+      .trim();
   } catch {
     return new Response(null, { status: 204 });
   }
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      let closed = false;
-      aStream.on("text", (delta: string) => {
-        if (closed) return;
-        if (delta.length > 0) controller.enqueue(encoder.encode(delta));
-      });
-      aStream.on("error", () => {
-        if (closed) return;
-        closed = true;
-        // Closing without erroring the stream lets the client read whatever
-        // it already received. If nothing was emitted, the client sees an
-        // empty body and falls back via the openingState='failed' path.
-        try {
-          controller.close();
-        } catch {
-          // already closed
-        }
-      });
-      aStream.on("end", () => {
-        if (closed) return;
-        closed = true;
-        try {
-          controller.close();
-        } catch {
-          // already closed
-        }
-      });
-    },
-    cancel() {
-      aStream.abort();
-    },
-  });
+  line = stripWrappingQuotes(line);
+  if (!line) {
+    return new Response(null, { status: 204 });
+  }
 
-  return new Response(stream, {
+  return new Response(line, {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "X-Content-Type-Options": "nosniff",

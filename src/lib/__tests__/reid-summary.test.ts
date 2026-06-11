@@ -5,6 +5,7 @@ import {
   qualifiesForSummary,
   synthesizeOnboardingGoals,
   isPlausibleFirstName,
+  stripWrappingQuotes,
 } from "../reid-summary.ts";
 
 // ---------------------------------------------------------------------------
@@ -214,4 +215,23 @@ test("real names still pass the plausibility check", () => {
   for (const good of ["Theo", "Maya", "Noah", "O'Brien", "Mary-Jane"]) {
     assert.equal(isPlausibleFirstName(good), true, good);
   }
+});
+
+// ---- stripWrappingQuotes (B1.7) ---------------------------------------------
+// The model sometimes recites its opener inside literal quotes despite the
+// "No quotes" rule (5/20 recent prod openers, Sprint 13 audit).
+
+test("stripWrappingQuotes removes a fully wrapping quote pair only", () => {
+  assert.equal(
+    stripWrappingQuotes('"I\'ve been waiting. What are you building?"'),
+    "I've been waiting. What are you building?",
+  );
+  assert.equal(stripWrappingQuotes("“Smart quotes too.”"), "Smart quotes too.");
+  assert.equal(
+    stripWrappingQuotes('He said "this" yesterday.'),
+    'He said "this" yesterday.',
+  );
+  assert.equal(stripWrappingQuotes('"Unbalanced opener'), '"Unbalanced opener');
+  assert.equal(stripWrappingQuotes("  \"padded\"  "), "padded");
+  assert.equal(stripWrappingQuotes(""), "");
 });
