@@ -11,6 +11,7 @@ import type {
   ObservationConfidence,
   Session,
 } from "@/types/db";
+import { isSessionClosed } from "./session-policy.ts";
 
 /** Shape of a single goal item captured during onboarding. The Reid model
  *  emits these as JSON in the onboarding-complete sentinel; we accept them
@@ -289,18 +290,67 @@ export async function getRecentSessionsWithMessages(
     }));
 }
 
-/** Returns true iff the session exists AND belongs to the given user. */
-export async function sessionBelongsTo(
+/** True iff the session exists, belongs to the user, AND is still open
+ *  (not summarised, not at its hard cap, not idle past the timeout).
+ *  Closed sessions must never be resumed — resuming them starved
+ *  summarise-at-next-start and bypassed the 20-message cap (the
+ *  founder-account memory bug, Sprint 13 audit). An idle-closed session
+ *  falls into the new-session path, whose summarise-at-next-start gives it
+ *  its summary lazily. */
+export async function sessionBelongsToAndOpen(
   db: SupabaseClient,
   sessionId: string,
   userId: string,
 ): Promise<boolean> {
   const { data } = await db
     .from("sessions")
-    .select("id, user_id")
+    .select("id, user_id, mode, summary, message_count, ended_at, started_at")
     .eq("id", sessionId)
     .maybeSingle();
-  return !!data && data.user_id === userId;
+  if (!data || data.user_id !== userId) return false;
+  return !isSessionClosed(
+    {
+      mode: (data.mode as string) ?? "chat",
+      summary: (data.summary as string | null) ?? null,
+      message_count: (data.message_count as number | null) ?? 0,
+      last_activity_at:
+        (data.ended_at as string | null) ??
+        (data.started_at as string | null) ??
+        null,
+    },
+    Date.now(),
+  );
+}
+
+/** Per-turn bookkeeping: bumps message_count, stamps the session's
+ *  last-activity timestamp, and refreshes the user's last_session_at.
+ *  NOTE the column wart, on purpose: `ended_at` IS the last-activity
+ *  timestamp (no updated_at column exists; every consumer already reads it
+ *  as activity). Closure is never inferred from ended_at — see
+ *  session-policy.ts. Extracted from endSession so the per-turn path stops
+ *  pretending to end the session. */
+export async function recordTurnActivity(
+  db: SupabaseClient,
+  sessionId: string,
+  userId: string,
+  messageCountDelta: number,
+): Promise<void> {
+  const { data: current } = await db
+    .from("sessions")
+    .select("message_count")
+    .eq("id", sessionId)
+    .maybeSingle();
+  await db
+    .from("sessions")
+    .update({
+      message_count: (current?.message_count ?? 0) + (messageCountDelta || 0),
+      ended_at: new Date().toISOString(), // last-activity stamp (see note)
+    })
+    .eq("id", sessionId);
+  await db
+    .from("users")
+    .update({ last_session_at: new Date().toISOString() })
+    .eq("id", userId);
 }
 
 /** Records a goal_event, advances the goal's current_value, and stamps

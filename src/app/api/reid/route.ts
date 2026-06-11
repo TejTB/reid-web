@@ -18,13 +18,21 @@ import {
 } from "@/lib/reid-sentinels";
 import {
   createSession,
-  sessionBelongsTo,
+  sessionBelongsToAndOpen,
   appendMessages,
   endSession,
+  recordTurnActivity,
   createGoalsFromOnboarding,
   clearGeneratedTakesForUser,
   type OnboardingGoalInput,
 } from "@/lib/session-server";
+import {
+  SESSION_HARD_CAP,
+  SESSION_NUDGE_AT,
+  ONBOARDING_NUDGE_AT,
+  ONBOARDING_FINAL_AT,
+  ONBOARDING_HARD_CAP,
+} from "@/lib/session-policy";
 import { reidRequestSchema } from "@/lib/validation";
 import { checkDailyMessageLimit, checkReidMinuteLimit } from "@/lib/ratelimit";
 import { messageCapsApply } from "@/lib/cap-policy";
@@ -408,7 +416,10 @@ export async function POST(req: NextRequest) {
   // session-limit and daily-rate-limit checks have passed.
   let creatingNewSession = false;
   if (sessionId) {
-    const ok = await sessionBelongsTo(db, sessionId, userId);
+    // Open-check, not just ownership: closed sessions (summarised, capped, or
+    // idle past the timeout) must never be resumed — resuming them starved
+    // summarise-at-next-start and bypassed the 20-message cap.
+    const ok = await sessionBelongsToAndOpen(db, sessionId, userId);
     if (!ok) {
       sessionId = undefined;
       creatingNewSession = true;
@@ -561,21 +572,14 @@ export async function POST(req: NextRequest) {
   // Read the session's current message_count BEFORE we stream so we can
   // inject a wrap-up nudge as we approach the 20-message cap. sessionId is
   // guaranteed to be defined here (either client-supplied or just minted).
-  const SESSION_HARD_CAP = 20;
-  const SESSION_NUDGE_AT = 16;
-  // Onboarding historically never wrapped: real voice onboarding sessions ran
-  // 30+ messages and the model never emitted [ONBOARDING_COMPLETE], so
-  // onboarding_complete/onboarding_summary were never written and Reid had no
-  // memory of onboarding. Sprint 12 Build B adds a three-stage close ladder:
-  //   14 — soft nudge ("move to close")
-  //   22 — hard directive ("this is your final exchange, emit it NOW")
-  //   26 — server force-complete (below): synthesise the close ourselves and
-  //        route it through the existing completion path, generating a
-  //        non-null onboarding_summary so the onboarding→chat1 memory callback
-  //        never breaks.
-  const ONBOARDING_NUDGE_AT = 14;
-  const ONBOARDING_FINAL_AT = 22;
-  const ONBOARDING_HARD_CAP = 26;
+  //
+  // The nudge/cap thresholds live in session-policy.ts (single source of
+  // truth shared with the closure check). Onboarding's three-stage close
+  // ladder (Sprint 12 Build B): 14 — soft nudge ("move to close"); 22 — hard
+  // directive ("this is your final exchange, emit it NOW"); 26 — server
+  // force-complete (below): synthesise the close ourselves and route it
+  // through the existing completion path, generating a non-null
+  // onboarding_summary so the onboarding→chat1 memory callback never breaks.
   const { data: preTurnSessionRow } = await db
     .from("sessions")
     .select("message_count")
@@ -824,15 +828,17 @@ export async function POST(req: NextRequest) {
             await processSentinels(db, parsed, userId, resolvedSessionId);
 
             // If processSentinels handled SESSION_COMPLETE it already
-            // wrapped endSession internally. Otherwise we still need to
-            // bump message_count and refresh ended_at so the timeline
-            // reflects this turn.
+            // wrapped endSession internally. Otherwise this is ordinary
+            // per-turn bookkeeping: bump message_count and stamp the
+            // last-activity timestamp — WITHOUT pretending to end the
+            // session (recordTurnActivity, B1 Task 1).
             if (!parsed.sessionComplete) {
-              await endSession(db, resolvedSessionId, {
+              await recordTurnActivity(
+                db,
+                resolvedSessionId,
                 userId,
-                messageCountDelta: newTurnMessages.length,
-                bumpUserCounters: false,
-              });
+                newTurnMessages.length,
+              );
             } else {
               // SESSION_COMPLETE path: still need to add this turn's
               // message_count, which processSentinels' endSession call did
@@ -856,25 +862,23 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // 20-message hard cap. Force-end the session here if the just-
-          // completed turn pushed message_count past SESSION_HARD_CAP and the
-          // session isn't already ended via SESSION_COMPLETE. Only applies to
-          // chat mode — onboarding has its own wrap path.
+          // 20-message hard cap. Closure is DERIVED (message_count >= cap,
+          // see session-policy.ts), so no flag write is needed — the old
+          // `alreadyEnded` guard read ended_at, which the per-turn path
+          // stamps as last-activity on every turn, making the cap dead code
+          // (the 36-message prod session). We only need to tell the client
+          // so it renders the recap. Only applies to chat mode — onboarding
+          // has its own wrap path.
           let sessionEnded = !!parsed.sessionComplete;
           if (mode === "chat" && !sessionEnded) {
             const { data: postRow } = await db
               .from("sessions")
-              .select("message_count, ended_at")
+              .select("message_count")
               .eq("id", resolvedSessionId)
               .maybeSingle();
             const postMessageCount =
               (postRow?.message_count as number | null) ?? 0;
-            const alreadyEnded = !!postRow?.ended_at;
-            if (postMessageCount >= SESSION_HARD_CAP && !alreadyEnded) {
-              await db
-                .from("sessions")
-                .update({ ended_at: new Date().toISOString() })
-                .eq("id", resolvedSessionId);
+            if (postMessageCount >= SESSION_HARD_CAP) {
               sessionEnded = true;
             }
           }

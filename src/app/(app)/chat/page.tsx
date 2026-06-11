@@ -11,7 +11,11 @@ import ReidWebOrb from "@/components/ReidWebOrb";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
 import { streamReid, DailyLimitError, SessionLimitError, RateLimitError } from "@/lib/reid";
 import RateLimitNotice from "@/components/RateLimitNotice";
-import { getChatSessionId, setChatSessionId } from "@/lib/session";
+import {
+  getChatSessionId,
+  setChatSessionId,
+  clearChatSessionId,
+} from "@/lib/session";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
 import { useVoiceLoop, type ReidTurnOutcome } from "@/lib/useVoiceLoop";
 import { useMounted } from "@/lib/use-mounted";
@@ -709,6 +713,18 @@ function ChatPageInner() {
         sessionId={endedSessionId}
         onClose={() => {
           setEndedSessionId(null);
+          // The session is over: drop the stored id (the server refuses
+          // closed sessions anyway), clear the transcript, and let Reid
+          // speak first in the NEXT session — its opener now has the
+          // just-written summary in context. Without the clear, the next
+          // send would carry the old transcript into a fresh session.
+          clearChatSessionId();
+          setSessionId(null);
+          setMessages([]);
+          setOpeningState("streaming");
+          setIsStreaming(true);
+          setStreamingText("");
+          void streamOpeningLine();
           // 1e: the just-ended session is now counted; refresh the entitlement
           // seam at the open of the NEXT session (0 messages) so the pill
           // reflects prior sessions only. Never refreshed mid-session, so the
