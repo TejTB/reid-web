@@ -27,8 +27,8 @@ import {
   endSession,
   insertObservation,
   type OnboardingGoalInput,
-} from "./session-server";
-import { isPlausibleFirstName } from "./reid-summary";
+} from "./session-server.ts";
+import { isPlausibleFirstName } from "./reid-summary.ts";
 
 // ----- types --------------------------------------------------------------
 
@@ -86,6 +86,25 @@ export const MAX_SENTINEL_PREFIX_LEN = SENTINEL_PREFIXES.reduce(
   (max, s) => Math.max(max, s.length),
   0,
 );
+
+/** Removes any line that begins with a known sentinel tag. Defensive net for
+ *  non-streaming surfaces (reid-take, task-complete ack) where the stream
+ *  stripper never runs — even with the sentinel spec omitted from their
+ *  prompts, the persona text mentions sentinels and a leak must not reach
+ *  the user (B1.5). */
+export function stripSentinelTags(text: string): string {
+  return text
+    .split("\n")
+    .filter(
+      (line) =>
+        !SENTINEL_PREFIXES.some((prefix) =>
+          line.trimStart().startsWith(prefix),
+        ),
+    )
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 // ----- regexes -------------------------------------------------------------
 

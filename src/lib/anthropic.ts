@@ -300,16 +300,26 @@ Rules:
 
 /** Builds the full system prompt for a single generation. `context` is the
  *  FOUNDER CONTEXT block returned by `getReidContext` — an empty string for
- *  never-seen users. */
-export function buildSystemPrompt(context: string): string {
+ *  never-seen users.
+ *
+ *  `sentinels: false` omits the sentinel emission spec — for non-streaming
+ *  surfaces (reid-take, task-complete ack) that have no stripper: teaching
+ *  the model sentinels there risks leaking one verbatim to the user (B1.5). */
+export function buildSystemPrompt(
+  context: string,
+  opts: { sentinels?: boolean } = {},
+): string {
+  const { sentinels = true } = opts;
   const parts: string[] = [];
   if (context && context.trim().length > 0) {
     parts.push(context);
     parts.push("");
   }
   parts.push(REID_VOICE);
-  parts.push("");
-  parts.push(REID_SENTINEL_INSTRUCTIONS);
+  if (sentinels) {
+    parts.push("");
+    parts.push(REID_SENTINEL_INSTRUCTIONS);
+  }
   return parts.join("\n");
 }
 
