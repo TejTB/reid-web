@@ -189,6 +189,7 @@ function ChatPageInner() {
     async (
       currentSessionId: string | null,
       msgs: Message[],
+      voice = false,
     ): Promise<{
       ok: boolean;
       text: string;
@@ -214,6 +215,7 @@ function ChatPageInner() {
             mode: "chat",
             sessionId: currentSessionId,
             messages: msgs,
+            voice,
           },
           { onSession, onActions, onSessionEnd },
         )) {
@@ -540,7 +542,13 @@ function ChatPageInner() {
       setPendingActions([]);
       setIsStreaming(true);
       setStreamingText("");
-      const result = await streamWithRetry(sessionIdRef.current, nextMessages);
+      // voice: true — this turn came from the voice loop, so the server can
+      // flag sessions.voice_used for voice entitlement counting (B1.8).
+      const result = await streamWithRetry(
+        sessionIdRef.current,
+        nextMessages,
+        true,
+      );
       if (result.sessionId && result.sessionId !== sessionIdRef.current) {
         setSessionId(result.sessionId);
         setChatSessionId(result.sessionId);

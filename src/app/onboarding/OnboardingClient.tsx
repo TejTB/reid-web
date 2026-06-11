@@ -182,6 +182,9 @@ export default function OnboardingClient() {
             mode: "onboarding",
             messages: seed,
             sessionId: sessionIdRef.current,
+            // Flag voice turns so sessions.voice_used reflects reality for
+            // the voice entitlement counters (B1.8).
+            voice: effectiveModeRef.current === "voice",
           },
           {
             onSession: (id) => {
