@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { anthropic, REID_MODEL, buildSystemPrompt } from "@/lib/anthropic";
+import { stripSentinelTags } from "@/lib/reid-sentinels";
 
 const Body = z.object({
   type: z.enum(["observation", "goal", "task"]),
@@ -67,7 +68,9 @@ export async function POST(req: Request) {
     const response = await anthropic.messages.create({
       model: REID_MODEL,
       max_tokens: 400,
-      system: buildSystemPrompt(""),
+      // No sentinel spec: this surface has no stream stripper, so a sentinel
+      // emission would reach the user verbatim (B1.5).
+      system: buildSystemPrompt("", { sentinels: false }),
       messages: [
         {
           role: "user",
@@ -78,7 +81,7 @@ export async function POST(req: Request) {
     for (const block of response.content) {
       if (block.type === "text") generated += block.text;
     }
-    generated = generated.trim();
+    generated = stripSentinelTags(generated.trim());
   } catch (err) {
     console.error("[api/reid-take] anthropic call failed:", err);
     return NextResponse.json({ error: "generation_failed" }, { status: 500 });

@@ -29,6 +29,7 @@ import { z } from "zod";
 import { anthropic, REID_MODEL, buildSystemPrompt } from "@/lib/anthropic";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { appendMessages } from "@/lib/session-server";
+import { stripSentinelTags } from "@/lib/reid-sentinels";
 
 const taskCompleteRequestSchema = z.object({
   taskText: z.string().min(1).max(2000),
@@ -78,7 +79,8 @@ export async function POST(req: NextRequest) {
   // 2) Ask Reid for one short sentence. Build the system prompt with empty
   // context so we don't pay the token cost of a full FOUNDER CONTEXT block
   // for a 1-sentence reply; the system note carries enough.
-  const systemPrompt = `${buildSystemPrompt("")}\n\nSYSTEM NOTE: ${SYSTEM_NOTE_INSTRUCTION}`;
+  // No sentinel spec: non-streaming surface with no stripper (B1.5).
+  const systemPrompt = `${buildSystemPrompt("", { sentinels: false })}\n\nSYSTEM NOTE: ${SYSTEM_NOTE_INSTRUCTION}`;
   let replyText = "";
   try {
     const response = await anthropic.messages.create({
@@ -94,7 +96,7 @@ export async function POST(req: NextRequest) {
     });
     const textBlock = response.content.find((b) => b.type === "text");
     if (textBlock && textBlock.type === "text") {
-      replyText = textBlock.text.trim();
+      replyText = stripSentinelTags(textBlock.text.trim());
     }
   } catch {
     // Anthropic failure: still return 200 so the optimistic UI doesn't roll

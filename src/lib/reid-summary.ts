@@ -141,6 +141,11 @@ const NAME_STOPLIST = new Set([
   "business", "service", "platform", "app", "tool", "idea", "project",
   // grammar fillers
   "an", "a",
+  // placeholder pseudo-names the model emits when it never learned a name —
+  // prod evidence: [NAME_CAPTURED] name="Unknown" written to users.name
+  // (B1.6, Sprint 13 audit)
+  "unknown", "user", "anonymous", "anon", "unnamed", "none", "nobody",
+  "someone", "unclear", "na",
 ]);
 
 /** Returns true when `name` looks like a real first name: 1-20 chars,
@@ -160,6 +165,25 @@ export function isPlausibleFirstName(name: string | null | undefined): boolean {
 
 function normaliseFirstName(raw: string): string {
   return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+}
+
+/** Strips ONE fully-wrapping straight/smart quote pair. The model sometimes
+ *  recites its scripted opener inside literal quotes despite the "No quotes"
+ *  rule (5/20 recent prod openers, Sprint 13 audit — B1.7). Inner quotes and
+ *  unbalanced wrapping are left alone. */
+export function stripWrappingQuotes(s: string): string {
+  const t = s.trim();
+  const pairs: Array<[string, string]> = [
+    ['"', '"'],
+    ["“", "”"], // “ ”
+    ["'", "'"],
+  ];
+  for (const [open, close] of pairs) {
+    if (t.length >= 2 && t.startsWith(open) && t.endsWith(close)) {
+      return t.slice(open.length, t.length - close.length).trim();
+    }
+  }
+  return t;
 }
 
 export function extractName(input: string | Array<{ role: string; content: string }>): string | null {

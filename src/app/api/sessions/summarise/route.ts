@@ -13,19 +13,14 @@
 
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { anthropic, REID_MODEL } from "@/lib/anthropic";
 import { getAuthedUser } from "@/lib/supabase-auth";
 import { endSession } from "@/lib/session-server";
+import { generateSessionSummary } from "@/lib/reid-summary";
+import { KEEPALIVE_MIN_IDLE_MS } from "@/lib/session-policy";
 
 const summariseRequestSchema = z.object({
   sessionId: z.string().uuid(),
 });
-
-const SUMMARISE_SYSTEM_PROMPT = `You are Reid. Direct. Unimpressed by excuses.
-
-The founder ended a session without you wrapping it. Write ONE honest sentence summarising what happened — the same voice you'd use in a [SESSION_COMPLETE] sentinel's summary attribute. No flattery, no recap of every turn, no hedging. Just the truth of what happened.
-
-Return the sentence as plain text. No JSON, no quotes around it, no preamble.`;
 
 export async function POST(req: NextRequest) {
   const authed = await getAuthedUser(req);
@@ -60,7 +55,7 @@ export async function POST(req: NextRequest) {
   // Confirm the session belongs to this user before any LLM work.
   const { data: sessionRow } = await db
     .from("sessions")
-    .select("id, user_id, summary")
+    .select("id, user_id, summary, ended_at, started_at")
     .eq("id", sessionId)
     .maybeSingle();
   if (!sessionRow || sessionRow.user_id !== userId) {
@@ -93,13 +88,14 @@ export async function POST(req: NextRequest) {
 
   const { data: messageRows } = await db
     .from("messages")
-    .select("role, content")
+    .select("role, content, created_at")
     .eq("session_id", sessionId)
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
   const messages = (messageRows ?? []) as Array<{
     role: "user" | "assistant";
     content: string;
+    created_at: string;
   }>;
 
   // Same threshold as /api/observe — sub-threshold sessions aren't worth the
@@ -108,36 +104,31 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true, skipped: "too_few_messages" });
   }
 
-  const transcript = messages
-    .map(
-      (m) =>
-        `${m.role === "assistant" ? "Reid" : "Founder"}: ${m.content.replace(/\s+/g, " ").trim()}`,
-    )
-    .join("\n");
-
-  let summaryText: string;
-  try {
-    const response = await anthropic.messages.create({
-      model: REID_MODEL,
-      max_tokens: 400,
-      system: SUMMARISE_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `Session transcript follows. Write your one-sentence summary.\n\n${transcript}`,
-        },
-      ],
-    });
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      return Response.json({ error: "anthropic_failed" }, { status: 502 });
-    }
-    summaryText = textBlock.text;
-  } catch {
-    return Response.json({ error: "anthropic_failed" }, { status: 502 });
+  // Recent-activity refusal (B1, Theo's amendment): unmount fires on every
+  // internal navigation, and writing a summary CLOSES the session under the
+  // derived-closure rule (session-policy.ts). A tab-switch must never close a
+  // live conversation — only genuinely idle sessions get summarised here;
+  // everything else closes lazily via summarise-at-next-start.
+  const lastMessageAt = Date.parse(messages[messages.length - 1].created_at);
+  const lastActivity = Number.isNaN(lastMessageAt)
+    ? Date.parse(
+        ((sessionRow.ended_at as string | null) ??
+          (sessionRow.started_at as string)) || "",
+      )
+    : lastMessageAt;
+  if (
+    !Number.isNaN(lastActivity) &&
+    Date.now() - lastActivity < KEEPALIVE_MIN_IDLE_MS
+  ) {
+    return Response.json({ ok: true, skipped: "recent_activity" });
   }
 
-  const summary = summaryText.trim();
+  // Structured Haiku summariser (B1.3) — same writer as the sentinel and
+  // next-start paths, so every path produces commitments/key_points.
+  const result = await generateSessionSummary(
+    messages.map((m) => ({ role: m.role, content: m.content })),
+  );
+  const summary = result.summary.trim();
   if (!summary) {
     return Response.json({ ok: true, skipped: "empty_response" });
   }
@@ -147,7 +138,7 @@ export async function POST(req: NextRequest) {
   // and a verbatim echo at SESSION 2 reads as a bug to the user.
   if (
     startingPoint.length > 0 &&
-    summary.trim().toLowerCase() === startingPoint
+    summary.toLowerCase() === startingPoint
   ) {
     return Response.json({
       ok: true,
@@ -158,6 +149,8 @@ export async function POST(req: NextRequest) {
   await endSession(db, sessionId, {
     userId,
     summary,
+    commitments: result.commitments,
+    keyPoints: result.key_points,
     bumpUserCounters: false,
   });
 

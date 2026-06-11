@@ -8,6 +8,7 @@ import {
   qualifiesForSummary,
   generateSessionSummary,
   synthesizeOnboardingGoals,
+  stripWrappingQuotes,
 } from "@/lib/reid-summary";
 import { getReidContext } from "@/lib/reid-context";
 import {
@@ -18,13 +19,21 @@ import {
 } from "@/lib/reid-sentinels";
 import {
   createSession,
-  sessionBelongsTo,
+  sessionBelongsToAndOpen,
   appendMessages,
   endSession,
+  recordTurnActivity,
   createGoalsFromOnboarding,
   clearGeneratedTakesForUser,
   type OnboardingGoalInput,
 } from "@/lib/session-server";
+import {
+  SESSION_HARD_CAP,
+  SESSION_NUDGE_AT,
+  ONBOARDING_NUDGE_AT,
+  ONBOARDING_FINAL_AT,
+  ONBOARDING_HARD_CAP,
+} from "@/lib/session-policy";
 import { reidRequestSchema } from "@/lib/validation";
 import { checkDailyMessageLimit, checkReidMinuteLimit } from "@/lib/ratelimit";
 import { messageCapsApply } from "@/lib/cap-policy";
@@ -408,7 +417,10 @@ export async function POST(req: NextRequest) {
   // session-limit and daily-rate-limit checks have passed.
   let creatingNewSession = false;
   if (sessionId) {
-    const ok = await sessionBelongsTo(db, sessionId, userId);
+    // Open-check, not just ownership: closed sessions (summarised, capped, or
+    // idle past the timeout) must never be resumed — resuming them starved
+    // summarise-at-next-start and bypassed the 20-message cap.
+    const ok = await sessionBelongsToAndOpen(db, sessionId, userId);
     if (!ok) {
       sessionId = undefined;
       creatingNewSession = true;
@@ -561,21 +573,14 @@ export async function POST(req: NextRequest) {
   // Read the session's current message_count BEFORE we stream so we can
   // inject a wrap-up nudge as we approach the 20-message cap. sessionId is
   // guaranteed to be defined here (either client-supplied or just minted).
-  const SESSION_HARD_CAP = 20;
-  const SESSION_NUDGE_AT = 16;
-  // Onboarding historically never wrapped: real voice onboarding sessions ran
-  // 30+ messages and the model never emitted [ONBOARDING_COMPLETE], so
-  // onboarding_complete/onboarding_summary were never written and Reid had no
-  // memory of onboarding. Sprint 12 Build B adds a three-stage close ladder:
-  //   14 — soft nudge ("move to close")
-  //   22 — hard directive ("this is your final exchange, emit it NOW")
-  //   26 — server force-complete (below): synthesise the close ourselves and
-  //        route it through the existing completion path, generating a
-  //        non-null onboarding_summary so the onboarding→chat1 memory callback
-  //        never breaks.
-  const ONBOARDING_NUDGE_AT = 14;
-  const ONBOARDING_FINAL_AT = 22;
-  const ONBOARDING_HARD_CAP = 26;
+  //
+  // The nudge/cap thresholds live in session-policy.ts (single source of
+  // truth shared with the closure check). Onboarding's three-stage close
+  // ladder (Sprint 12 Build B): 14 — soft nudge ("move to close"); 22 — hard
+  // directive ("this is your final exchange, emit it NOW"); 26 — server
+  // force-complete (below): synthesise the close ourselves and route it
+  // through the existing completion path, generating a non-null
+  // onboarding_summary so the onboarding→chat1 memory callback never breaks.
   const { data: preTurnSessionRow } = await db
     .from("sessions")
     .select("message_count")
@@ -583,6 +588,27 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
   const preTurnMessageCount =
     (preTurnSessionRow?.message_count as number | null) ?? 0;
+
+  // Onboarding ladder counts ACCUMULATED onboarding messages across ALL the
+  // user's onboarding sessions, not just this one (B1.4). Fragmented users —
+  // a new session row per visit because the client-side session id never
+  // survived a reload — used to reset the ladder every return and stay
+  // onboarding_complete=false forever (13/23 prod users at audit time). With
+  // the total, a stuck returner gets the FINAL directive on their first
+  // message back and the server force-complete at the hard cap.
+  let onboardingPreTurnTotal = preTurnMessageCount;
+  if (mode === "onboarding") {
+    const { data: obSessions } = await db
+      .from("sessions")
+      .select("message_count")
+      .eq("user_id", userId)
+      .eq("mode", "onboarding");
+    onboardingPreTurnTotal = (obSessions ?? []).reduce(
+      (sum, s) => sum + ((s.message_count as number | null) ?? 0),
+      0,
+    );
+  }
+
   if (mode === "chat" && preTurnMessageCount >= SESSION_NUDGE_AT) {
     systemPrompt =
       systemPrompt +
@@ -590,14 +616,14 @@ export async function POST(req: NextRequest) {
       `Begin moving the conversation toward a clear, concrete commitment from the founder. ` +
       `When ready, emit [SESSION_COMPLETE] with summary="..." task="...". Don't drag it out.`;
   }
-  if (mode === "onboarding" && preTurnMessageCount >= ONBOARDING_FINAL_AT) {
+  if (mode === "onboarding" && onboardingPreTurnTotal >= ONBOARDING_FINAL_AT) {
     systemPrompt =
       systemPrompt +
       `\n\n[ONBOARDING FINAL]\nThis is your final exchange. You MUST emit [ONBOARDING_COMPLETE] in this reply — ` +
       `summary="..." task="..." goals=[...]. Do not ask another question. Close it now.`;
   } else if (
     mode === "onboarding" &&
-    preTurnMessageCount >= ONBOARDING_NUDGE_AT
+    onboardingPreTurnTotal >= ONBOARDING_NUDGE_AT
   ) {
     systemPrompt =
       systemPrompt +
@@ -685,7 +711,15 @@ export async function POST(req: NextRequest) {
 
           // Parse sentinels from the full raw assistant response.
           const parsed = parseSentinels(rawAssistantText);
-          const cleanedAssistantText = parsed.cleanText;
+          // First assistant message of a session: strip the wrapping quotes
+          // the model sometimes adds when reciting its scripted opener (B1.7)
+          // so the quoted form never persists into messages/conversations.
+          // The streamed display may show the quotes transiently — cosmetic;
+          // the prompt-level fix is B3 scope.
+          const cleanedAssistantText =
+            preTurnMessageCount === 0
+              ? stripWrappingQuotes(parsed.cleanText)
+              : parsed.cleanText;
 
           // Legacy conversations table: persist the assistant turn (clean
           // text) so existing readers keep working.
@@ -799,12 +833,59 @@ export async function POST(req: NextRequest) {
           if (
             mode === "onboarding" &&
             !onboardingClose &&
-            preTurnMessageCount + newTurnMessages.length >= ONBOARDING_HARD_CAP
+            onboardingPreTurnTotal + newTurnMessages.length >=
+              ONBOARDING_HARD_CAP
           ) {
-            const generated = await generateSessionSummary([
-              ...messages.map((m) => ({ role: m.role, content: m.content })),
-              { role: "assistant" as const, content: cleanedAssistantText },
-            ]);
+            // Synthesise from the user's ACCUMULATED onboarding history (all
+            // sessions, oldest first) — a rescued fragmented user's current
+            // session may hold only 1-2 turns of signal. Fall back to the
+            // client-sent transcript when the DB history is too thin.
+            let historyMsgs: { role: "user" | "assistant"; content: string }[] =
+              [];
+            try {
+              const { data: obSessionIds } = await db
+                .from("sessions")
+                .select("id")
+                .eq("user_id", userId)
+                .eq("mode", "onboarding");
+              const ids = (obSessionIds ?? []).map((s) => s.id as string);
+              if (ids.length > 0) {
+                const { data: historyRows } = await db
+                  .from("messages")
+                  .select("role, content")
+                  .in("session_id", ids)
+                  .eq("user_id", userId)
+                  .order("created_at", { ascending: true })
+                  .limit(60);
+                historyMsgs = (historyRows ?? []).map((r) => ({
+                  role: r.role as "user" | "assistant",
+                  content: r.content as string,
+                }));
+              }
+            } catch {
+              // History fetch is best-effort; the client transcript fallback
+              // below always works.
+            }
+            const generated = await generateSessionSummary(
+              historyMsgs.length >= 4
+                ? [
+                    ...historyMsgs,
+                    {
+                      role: "assistant" as const,
+                      content: cleanedAssistantText,
+                    },
+                  ]
+                : [
+                    ...messages.map((m) => ({
+                      role: m.role,
+                      content: m.content,
+                    })),
+                    {
+                      role: "assistant" as const,
+                      content: cleanedAssistantText,
+                    },
+                  ],
+            );
             // Sprint 13: seed a minimal goal from the synthesised close so a
             // force-completed founder never lands on an empty /home (the
             // goals: [] here used to skip createGoalsFromOnboarding entirely).
@@ -824,15 +905,17 @@ export async function POST(req: NextRequest) {
             await processSentinels(db, parsed, userId, resolvedSessionId);
 
             // If processSentinels handled SESSION_COMPLETE it already
-            // wrapped endSession internally. Otherwise we still need to
-            // bump message_count and refresh ended_at so the timeline
-            // reflects this turn.
+            // wrapped endSession internally. Otherwise this is ordinary
+            // per-turn bookkeeping: bump message_count and stamp the
+            // last-activity timestamp — WITHOUT pretending to end the
+            // session (recordTurnActivity, B1 Task 1).
             if (!parsed.sessionComplete) {
-              await endSession(db, resolvedSessionId, {
+              await recordTurnActivity(
+                db,
+                resolvedSessionId,
                 userId,
-                messageCountDelta: newTurnMessages.length,
-                bumpUserCounters: false,
-              });
+                newTurnMessages.length,
+              );
             } else {
               // SESSION_COMPLETE path: still need to add this turn's
               // message_count, which processSentinels' endSession call did
@@ -853,28 +936,49 @@ export async function POST(req: NextRequest) {
               // grown since these were cached. Fire-and-forget; cache misses
               // are cheap compared to a stale take.
               await clearGeneratedTakesForUser(db, userId);
+
+              // Structured memory pass (B1.3): the sentinel close writes
+              // Reid's one-line summary= but no commitments/key_points. Fill
+              // them from the transcript (keeping Reid's in-voice summary) so
+              // every writer produces the structured layer B2 will inject.
+              try {
+                const structured = await generateSessionSummary([
+                  ...messages.map((m) => ({
+                    role: m.role,
+                    content: m.content,
+                  })),
+                  { role: "assistant" as const, content: cleanedAssistantText },
+                ]);
+                await db
+                  .from("sessions")
+                  .update({
+                    commitments: structured.commitments,
+                    key_points: structured.key_points,
+                  })
+                  .eq("id", resolvedSessionId);
+              } catch {
+                // Best-effort: never fail the turn over memory enrichment.
+              }
             }
           }
 
-          // 20-message hard cap. Force-end the session here if the just-
-          // completed turn pushed message_count past SESSION_HARD_CAP and the
-          // session isn't already ended via SESSION_COMPLETE. Only applies to
-          // chat mode — onboarding has its own wrap path.
+          // 20-message hard cap. Closure is DERIVED (message_count >= cap,
+          // see session-policy.ts), so no flag write is needed — the old
+          // `alreadyEnded` guard read ended_at, which the per-turn path
+          // stamps as last-activity on every turn, making the cap dead code
+          // (the 36-message prod session). We only need to tell the client
+          // so it renders the recap. Only applies to chat mode — onboarding
+          // has its own wrap path.
           let sessionEnded = !!parsed.sessionComplete;
           if (mode === "chat" && !sessionEnded) {
             const { data: postRow } = await db
               .from("sessions")
-              .select("message_count, ended_at")
+              .select("message_count")
               .eq("id", resolvedSessionId)
               .maybeSingle();
             const postMessageCount =
               (postRow?.message_count as number | null) ?? 0;
-            const alreadyEnded = !!postRow?.ended_at;
-            if (postMessageCount >= SESSION_HARD_CAP && !alreadyEnded) {
-              await db
-                .from("sessions")
-                .update({ ended_at: new Date().toISOString() })
-                .eq("id", resolvedSessionId);
+            if (postMessageCount >= SESSION_HARD_CAP) {
               sessionEnded = true;
             }
           }

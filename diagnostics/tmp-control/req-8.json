@@ -1,0 +1,1 @@
+{"model": "claude-sonnet-4-6", "max_tokens": 300, "system": "You are a helpful startup advisor.", "messages": [{"role": "user", "content": "ok i want to map out the new landing page, thinking full-bleed hero with an animated gradient, what sections should i have"}]}

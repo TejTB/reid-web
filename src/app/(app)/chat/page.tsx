@@ -11,7 +11,11 @@ import ReidWebOrb from "@/components/ReidWebOrb";
 import { useAuth, useIsPro } from "@/components/AuthProvider";
 import { streamReid, DailyLimitError, SessionLimitError, RateLimitError } from "@/lib/reid";
 import RateLimitNotice from "@/components/RateLimitNotice";
-import { getChatSessionId, setChatSessionId } from "@/lib/session";
+import {
+  getChatSessionId,
+  setChatSessionId,
+  clearChatSessionId,
+} from "@/lib/session";
 import { formatLastSession, formatSessionDate } from "@/lib/format";
 import { useVoiceLoop, type ReidTurnOutcome } from "@/lib/useVoiceLoop";
 import { useMounted } from "@/lib/use-mounted";
@@ -176,11 +180,16 @@ function ChatPageInner() {
     files?: File[];
   } | null>(null);
   const initialized = useRef(false);
+  // In-flight guard for the opening-line fetch: dev StrictMode remounts (and
+  // any future double-invocation) must not fire two /api/reid/opening POSTs.
+  // Prod data shows no duplication (B1 verification) — this is belt-and-braces.
+  const openingInFlight = useRef(false);
 
   const streamWithRetry = useCallback(
     async (
       currentSessionId: string | null,
       msgs: Message[],
+      voice = false,
     ): Promise<{
       ok: boolean;
       text: string;
@@ -206,6 +215,7 @@ function ChatPageInner() {
             mode: "chat",
             sessionId: currentSessionId,
             messages: msgs,
+            voice,
           },
           { onSession, onActions, onSessionEnd },
         )) {
@@ -292,6 +302,8 @@ function ChatPageInner() {
   // transcript. On 204 / empty body / network error the empty-state CTA
   // takes over via the 'failed' branch.
   const streamOpeningLine = useCallback(async () => {
+    if (openingInFlight.current) return;
+    openingInFlight.current = true;
     setOpeningState("streaming");
     setStreamingText("");
     setIsStreaming(true);
@@ -335,6 +347,8 @@ function ChatPageInner() {
       setOpeningState("failed");
       setIsStreaming(false);
       setStreamingText("");
+    } finally {
+      openingInFlight.current = false;
     }
   }, []);
 
@@ -528,7 +542,13 @@ function ChatPageInner() {
       setPendingActions([]);
       setIsStreaming(true);
       setStreamingText("");
-      const result = await streamWithRetry(sessionIdRef.current, nextMessages);
+      // voice: true — this turn came from the voice loop, so the server can
+      // flag sessions.voice_used for voice entitlement counting (B1.8).
+      const result = await streamWithRetry(
+        sessionIdRef.current,
+        nextMessages,
+        true,
+      );
       if (result.sessionId && result.sessionId !== sessionIdRef.current) {
         setSessionId(result.sessionId);
         setChatSessionId(result.sessionId);
@@ -709,6 +729,18 @@ function ChatPageInner() {
         sessionId={endedSessionId}
         onClose={() => {
           setEndedSessionId(null);
+          // The session is over: drop the stored id (the server refuses
+          // closed sessions anyway), clear the transcript, and let Reid
+          // speak first in the NEXT session — its opener now has the
+          // just-written summary in context. Without the clear, the next
+          // send would carry the old transcript into a fresh session.
+          clearChatSessionId();
+          setSessionId(null);
+          setMessages([]);
+          setOpeningState("streaming");
+          setIsStreaming(true);
+          setStreamingText("");
+          void streamOpeningLine();
           // 1e: the just-ended session is now counted; refresh the entitlement
           // seam at the open of the NEXT session (0 messages) so the pill
           // reflects prior sessions only. Never refreshed mid-session, so the
