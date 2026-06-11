@@ -859,6 +859,29 @@ export async function POST(req: NextRequest) {
               // grown since these were cached. Fire-and-forget; cache misses
               // are cheap compared to a stale take.
               await clearGeneratedTakesForUser(db, userId);
+
+              // Structured memory pass (B1.3): the sentinel close writes
+              // Reid's one-line summary= but no commitments/key_points. Fill
+              // them from the transcript (keeping Reid's in-voice summary) so
+              // every writer produces the structured layer B2 will inject.
+              try {
+                const structured = await generateSessionSummary([
+                  ...messages.map((m) => ({
+                    role: m.role,
+                    content: m.content,
+                  })),
+                  { role: "assistant" as const, content: cleanedAssistantText },
+                ]);
+                await db
+                  .from("sessions")
+                  .update({
+                    commitments: structured.commitments,
+                    key_points: structured.key_points,
+                  })
+                  .eq("id", resolvedSessionId);
+              } catch {
+                // Best-effort: never fail the turn over memory enrichment.
+              }
             }
           }
 

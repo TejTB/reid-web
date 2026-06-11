@@ -80,6 +80,10 @@ export async function endSession(
     userId: string;
     summary?: string | null;
     taskSet?: string | null;
+    /** Structured memory (B1.3): things the founder said they'd do. */
+    commitments?: string[] | null;
+    /** Structured memory (B1.3): facts worth remembering next session. */
+    keyPoints?: string[] | null;
     messageCountDelta?: number;
     bumpUserCounters?: boolean;
   },
@@ -88,6 +92,8 @@ export async function endSession(
     userId,
     summary,
     taskSet,
+    commitments,
+    keyPoints,
     messageCountDelta = 0,
     bumpUserCounters = false,
   } = options;
@@ -106,6 +112,8 @@ export async function endSession(
   };
   if (summary !== undefined && summary !== null) sessionUpdate.summary = summary;
   if (taskSet !== undefined && taskSet !== null) sessionUpdate.task_set = taskSet;
+  if (commitments && commitments.length > 0) sessionUpdate.commitments = commitments;
+  if (keyPoints && keyPoints.length > 0) sessionUpdate.key_points = keyPoints;
 
   await db.from("sessions").update(sessionUpdate).eq("id", sessionId);
 
