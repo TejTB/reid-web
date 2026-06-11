@@ -162,6 +162,7 @@ export async function signOut(): Promise<void> {
       "reid:userId",
       "reid:onboarded",
       "reid:chatSessionId",
+      "reid:onboardingSessionId",
       "reid:push:asked",
     ]) {
       localStorage.removeItem(k);

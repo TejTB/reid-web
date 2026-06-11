@@ -100,6 +100,10 @@ const ORB_TAP_LABEL: Record<string, string> = {
 
 type InputMode = "voice" | "text";
 
+/** localStorage key for the live onboarding session id. Mirrors
+ *  `reid:chatSessionId` (lib/session.ts); also cleared by signOut. */
+const ONBOARDING_SESSION_KEY = "reid:onboardingSessionId";
+
 export default function OnboardingClient() {
   const router = useRouter();
   const { me, loading: authLoading, refresh } = useAuth();
@@ -131,8 +135,21 @@ export default function OnboardingClient() {
   const coldOpenAbortRef = useRef<AbortController | null>(null);
   // The live onboarding session id (X-Reid-Session-Id), read by every
   // subsequent turn, /api/transcribe, and /api/tts. A ref (not state): it's
-  // consumed inside async closures and getters, never rendered.
+  // consumed inside async closures and getters, never rendered. Persisted to
+  // localStorage (B1.4) so a reload mid-onboarding resumes the SAME session —
+  // ref-only threading minted a new session row per visit, which reset the
+  // close ladder every return and left users onboarding_complete=false
+  // forever. Cleared on completion and on signOut.
   const sessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (sessionIdRef.current) return;
+    try {
+      const stored = localStorage.getItem(ONBOARDING_SESSION_KEY);
+      if (stored) sessionIdRef.current = stored;
+    } catch {
+      // localStorage unavailable — ref-only threading still works.
+    }
+  }, []);
   // Latest messages / rendered mode for async closures — no stale captures.
   const messagesRef = useRef<Message[]>(messages);
   const effectiveModeRef = useRef<InputMode>("voice");
@@ -169,6 +186,11 @@ export default function OnboardingClient() {
           {
             onSession: (id) => {
               sessionIdRef.current = id;
+              try {
+                localStorage.setItem(ONBOARDING_SESSION_KEY, id);
+              } catch {
+                // best-effort persistence
+              }
             },
           },
         )) {
@@ -306,6 +328,13 @@ export default function OnboardingClient() {
   // is idempotent — the replace navigates away and unmount clears the timer.
   useEffect(() => {
     if (!isCompleting) return;
+    // Onboarding is done — the stored session id must not leak into a future
+    // visit (the server would refuse the closed session anyway).
+    try {
+      localStorage.removeItem(ONBOARDING_SESSION_KEY);
+    } catch {
+      // best-effort cleanup
+    }
     const t = window.setTimeout(() => router.replace("/home"), 600);
     return () => window.clearTimeout(t);
   }, [isCompleting, router]);

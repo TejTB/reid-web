@@ -587,6 +587,27 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
   const preTurnMessageCount =
     (preTurnSessionRow?.message_count as number | null) ?? 0;
+
+  // Onboarding ladder counts ACCUMULATED onboarding messages across ALL the
+  // user's onboarding sessions, not just this one (B1.4). Fragmented users —
+  // a new session row per visit because the client-side session id never
+  // survived a reload — used to reset the ladder every return and stay
+  // onboarding_complete=false forever (13/23 prod users at audit time). With
+  // the total, a stuck returner gets the FINAL directive on their first
+  // message back and the server force-complete at the hard cap.
+  let onboardingPreTurnTotal = preTurnMessageCount;
+  if (mode === "onboarding") {
+    const { data: obSessions } = await db
+      .from("sessions")
+      .select("message_count")
+      .eq("user_id", userId)
+      .eq("mode", "onboarding");
+    onboardingPreTurnTotal = (obSessions ?? []).reduce(
+      (sum, s) => sum + ((s.message_count as number | null) ?? 0),
+      0,
+    );
+  }
+
   if (mode === "chat" && preTurnMessageCount >= SESSION_NUDGE_AT) {
     systemPrompt =
       systemPrompt +
@@ -594,14 +615,14 @@ export async function POST(req: NextRequest) {
       `Begin moving the conversation toward a clear, concrete commitment from the founder. ` +
       `When ready, emit [SESSION_COMPLETE] with summary="..." task="...". Don't drag it out.`;
   }
-  if (mode === "onboarding" && preTurnMessageCount >= ONBOARDING_FINAL_AT) {
+  if (mode === "onboarding" && onboardingPreTurnTotal >= ONBOARDING_FINAL_AT) {
     systemPrompt =
       systemPrompt +
       `\n\n[ONBOARDING FINAL]\nThis is your final exchange. You MUST emit [ONBOARDING_COMPLETE] in this reply — ` +
       `summary="..." task="..." goals=[...]. Do not ask another question. Close it now.`;
   } else if (
     mode === "onboarding" &&
-    preTurnMessageCount >= ONBOARDING_NUDGE_AT
+    onboardingPreTurnTotal >= ONBOARDING_NUDGE_AT
   ) {
     systemPrompt =
       systemPrompt +
@@ -803,12 +824,59 @@ export async function POST(req: NextRequest) {
           if (
             mode === "onboarding" &&
             !onboardingClose &&
-            preTurnMessageCount + newTurnMessages.length >= ONBOARDING_HARD_CAP
+            onboardingPreTurnTotal + newTurnMessages.length >=
+              ONBOARDING_HARD_CAP
           ) {
-            const generated = await generateSessionSummary([
-              ...messages.map((m) => ({ role: m.role, content: m.content })),
-              { role: "assistant" as const, content: cleanedAssistantText },
-            ]);
+            // Synthesise from the user's ACCUMULATED onboarding history (all
+            // sessions, oldest first) — a rescued fragmented user's current
+            // session may hold only 1-2 turns of signal. Fall back to the
+            // client-sent transcript when the DB history is too thin.
+            let historyMsgs: { role: "user" | "assistant"; content: string }[] =
+              [];
+            try {
+              const { data: obSessionIds } = await db
+                .from("sessions")
+                .select("id")
+                .eq("user_id", userId)
+                .eq("mode", "onboarding");
+              const ids = (obSessionIds ?? []).map((s) => s.id as string);
+              if (ids.length > 0) {
+                const { data: historyRows } = await db
+                  .from("messages")
+                  .select("role, content")
+                  .in("session_id", ids)
+                  .eq("user_id", userId)
+                  .order("created_at", { ascending: true })
+                  .limit(60);
+                historyMsgs = (historyRows ?? []).map((r) => ({
+                  role: r.role as "user" | "assistant",
+                  content: r.content as string,
+                }));
+              }
+            } catch {
+              // History fetch is best-effort; the client transcript fallback
+              // below always works.
+            }
+            const generated = await generateSessionSummary(
+              historyMsgs.length >= 4
+                ? [
+                    ...historyMsgs,
+                    {
+                      role: "assistant" as const,
+                      content: cleanedAssistantText,
+                    },
+                  ]
+                : [
+                    ...messages.map((m) => ({
+                      role: m.role,
+                      content: m.content,
+                    })),
+                    {
+                      role: "assistant" as const,
+                      content: cleanedAssistantText,
+                    },
+                  ],
+            );
             // Sprint 13: seed a minimal goal from the synthesised close so a
             // force-completed founder never lands on an empty /home (the
             // goals: [] here used to skip createGoalsFromOnboarding entirely).
