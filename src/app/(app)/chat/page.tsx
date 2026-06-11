@@ -180,6 +180,10 @@ function ChatPageInner() {
     files?: File[];
   } | null>(null);
   const initialized = useRef(false);
+  // In-flight guard for the opening-line fetch: dev StrictMode remounts (and
+  // any future double-invocation) must not fire two /api/reid/opening POSTs.
+  // Prod data shows no duplication (B1 verification) — this is belt-and-braces.
+  const openingInFlight = useRef(false);
 
   const streamWithRetry = useCallback(
     async (
@@ -296,6 +300,8 @@ function ChatPageInner() {
   // transcript. On 204 / empty body / network error the empty-state CTA
   // takes over via the 'failed' branch.
   const streamOpeningLine = useCallback(async () => {
+    if (openingInFlight.current) return;
+    openingInFlight.current = true;
     setOpeningState("streaming");
     setStreamingText("");
     setIsStreaming(true);
@@ -339,6 +345,8 @@ function ChatPageInner() {
       setOpeningState("failed");
       setIsStreaming(false);
       setStreamingText("");
+    } finally {
+      openingInFlight.current = false;
     }
   }, []);
 
